@@ -2,6 +2,7 @@ import { refreshAllChannels } from "./rss.js";
 import { discoverFromTopic } from "./youtube-api.js";
 import { stmts } from "./db.js";
 import { runWithLimit } from "./utils.js";
+import { runBackup } from "./backup.js";
 
 const INTERVALS = {
   rss: 24 * 60 * 60 * 1000,
@@ -46,27 +47,6 @@ if (process.argv[1] && process.argv[1].endsWith("cron.js")) {
 }
 
 export { runRSSRefresh, runDiscovery, INTERVALS, startCron };
-
-async function runBackup() {
-  try {
-    const { copyFileSync, mkdirSync, readdirSync, rmSync, existsSync } = await import("fs");
-    const { join, dirname } = await import("path");
-    const { fileURLToPath } = await import("url");
-    const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const dbPath = join(root, "youfind.db");
-    const backupDir = join(root, "backups");
-    if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
-    const date = new Date();
-    const ts = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-    const dest = join(backupDir, `youfind-${ts}.db`);
-    copyFileSync(dbPath, dest);
-    const all = readdirSync(backupDir).filter((f) => f.startsWith("youfind-") && f.endsWith(".db")).sort().reverse();
-    if (all.length > 14) for (const old of all.slice(14)) rmSync(join(backupDir, old));
-    console.log(`[Cron] DB backup done: ${dest}`);
-  } catch (e) {
-    console.error("[Cron] Backup error:", e.message);
-  }
-}
 
 function startCron() {
   console.log("[Cron] Starting scheduled tasks...");
