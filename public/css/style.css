@@ -1053,8 +1053,15 @@ mark {
   inset: 0;
   width: 100% !important;
   height: 100% !important;
-  pointer-events: auto;
   border: none;
+  pointer-events: none;
+}
+/* Only enable pointer events on the player when the backdrop is open.
+   Otherwise the invisible player sits on top of the page (z-index: 1000)
+   and intercepts all clicks, breaking hover/click on video cards. */
+.player-backdrop.open #playerVid,
+.player-backdrop.open .player-vid iframe {
+  pointer-events: auto;
 }
 
 .player-close {

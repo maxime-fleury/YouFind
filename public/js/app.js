@@ -12,6 +12,7 @@ let prefetchedVideos = null;
 let prefetchPromise = null;
 let prefetchAbortController = null;
 let currentVideoFilter = "";
+let videoSearchDebounce = null;
 const VIDEO_PAGE_SIZE = 60;
 const rejectModal = new bootstrap.Modal(document.getElementById("rejectModal"));
 const addChannelModal = new bootstrap.Modal(document.getElementById("addChannelModal"));
@@ -191,9 +192,10 @@ function renderVideoCard(v, seenSet) {
   const seenClass = seenSet.has(v.url) ? "seen" : "";
   return `
     <div class="col-sm-6 col-md-4 col-xl-3">
-      <div class="video-card h-100 ${seenClass}" data-video-url="${escapeHtml(v.url)}" onclick="playVideo('${escapeJs(v.url)}')" style="cursor:pointer" title="${seenClass ? 'Déjà vu' : ''}">
+      <div class="video-card h-100 ${seenClass}" data-video-url="${escapeHtml(v.url)}" onclick="playVideo('${escapeJs(v.url)}')" title="${seenClass ? 'Déjà vu' : ''}">
         <div class="thumb-wrap">
             ${v.thumbnail ? `<img src="${v.thumbnail}" alt="" loading="lazy">` : ""}
+            <div class="play-overlay" aria-hidden="true"><i class="bi bi-play-circle-fill"></i></div>
             ${seenClass ? `<span class="seen-badge"><i class="bi bi-check-circle-fill"></i> Vu</span>` : ""}
             <span class="views-badge"><i class="bi bi-eye"></i> ${formatNumber(v.vues)}</span>
             ${v.duration ? `<span class="duration-badge">${formatDuration(v.duration)}</span>` : ""}
@@ -214,41 +216,76 @@ function renderVideoCard(v, seenSet) {
     </div>`;
 }
 
+function showVideoSkeletons(count) {
+  const container = document.getElementById("videos-loading");
+  container.innerHTML = Array.from({ length: count }, () => `
+    <div class="col-sm-6 col-md-4 col-xl-3">
+      <div class="video-card h-100" style="background: transparent; border: none; box-shadow: none; pointer-events: none;">
+        <div class="thumb-wrap" style="padding-top: 0; aspect-ratio: 16/9;">
+          <div class="skeleton" style="position: absolute; inset: 0; border-radius: 14px 14px 0 0;"></div>
+        </div>
+        <div class="card-body">
+          <div class="skeleton mb-2" style="height: 14px; width: 92%;"></div>
+          <div class="skeleton mb-3" style="height: 14px; width: 64%;"></div>
+          <div class="skeleton" style="height: 12px; width: 42%;"></div>
+        </div>
+      </div>
+    </div>
+  `).join("");
+  container.classList.remove("d-none");
+}
+
+function hideVideoSkeletons() {
+  const container = document.getElementById("videos-loading");
+  if (container) container.classList.add("d-none");
+}
+
+function debounceVideoSearch() {
+  clearTimeout(videoSearchDebounce);
+  videoSearchDebounce = setTimeout(() => loadVideos(true), 300);
+}
+
 async function loadVideos(reset = true) {
   const grid = document.getElementById("videos-grid");
   const topicFilter = document.getElementById("video-topic-filter")?.value || "";
   const sort = document.getElementById("video-sort")?.value || "newest";
+  const search = document.getElementById("video-search")?.value.trim() || "";
 
   if (reset) {
     videoOffset = 0;
     hasMoreVideos = true;
     isFetchingVideos = false;
     prefetchedVideos = null;
+    prefetchPromise = null;
     if (prefetchAbortController) {
       prefetchAbortController.abort();
       prefetchAbortController = null;
     }
-    currentVideoFilter = `${topicFilter}:${sort}`;
+    currentVideoFilter = `${topicFilter}:${sort}:${search}`;
     if (videoObserver) {
       videoObserver.disconnect();
       videoObserver = null;
     }
-    grid.innerHTML = '<div class="col-12 text-center py-5" id="video-loading"><div class="spinner-glass"></div> Chargement...</div>';
+    grid.innerHTML = "";
+    document.getElementById("videos-empty")?.classList.add("d-none");
+    showVideoSkeletons(12);
   }
 
-  // Filter/sort changed mid-stream: discard stale prefetch and restart
-  if (currentVideoFilter !== `${topicFilter}:${sort}`) {
+  // Filter/sort/search changed mid-stream: discard stale prefetch and restart
+  if (currentVideoFilter !== `${topicFilter}:${sort}:${search}`) {
     return loadVideos(true);
   }
 
   if (isFetchingVideos || !hasMoreVideos) return;
   isFetchingVideos = true;
 
-  // Remove any existing end-of-feed message before fetching
+  // Hide empty state and remove any existing end-of-feed message before fetching
+  document.getElementById("videos-empty")?.classList.add("d-none");
   document.getElementById("video-end-message")?.remove();
 
   let url = `/videos?limit=${VIDEO_PAGE_SIZE}&offset=${videoOffset}&sort=${sort}`;
   if (topicFilter) url += `&topic=${topicFilter}`;
+  if (search) url += `&q=${encodeURIComponent(search)}`;
 
   try {
     // Use prefetched page if available, otherwise fetch live
@@ -257,15 +294,10 @@ async function loadVideos(reset = true) {
       videos = await api(url);
     }
     prefetchedVideos = null;
-    document.getElementById("video-loading")?.remove();
+    hideVideoSkeletons();
 
     if (reset && videos.length === 0) {
-      grid.innerHTML = `
-        <div class="col-12 empty-state">
-          <i class="bi bi-camera-reels"></i>
-          <h5>Aucune video</h5>
-          <p>Ajoute des chaines valides et refresh le RSS pour commencer.</p>
-        </div>`;
+      document.getElementById("videos-empty")?.classList.remove("d-none");
       return;
     }
 
@@ -283,22 +315,23 @@ async function loadVideos(reset = true) {
     } else {
       ensureVideoScrollTrigger(grid);
       // Prefetch the next page in the background
-      prefetchNextPage(topicFilter);
+      prefetchNextPage(topicFilter, search);
     }
   } catch (err) {
-    document.getElementById("video-loading")?.remove();
     showToast("Erreur lors du chargement des vidéos: " + err.message, "error");
   } finally {
+    hideVideoSkeletons();
     isFetchingVideos = false;
   }
 }
 
-function prefetchNextPage(topicFilter) {
+function prefetchNextPage(topicFilter, search) {
   if (prefetchedVideos || prefetchPromise) return; // already cached or in flight
   const nextOffset = videoOffset;
   const sort = document.getElementById("video-sort")?.value || "newest";
   let url = `/videos?limit=${VIDEO_PAGE_SIZE}&offset=${nextOffset}&sort=${sort}`;
   if (topicFilter) url += `&topic=${topicFilter}`;
+  if (search) url += `&q=${encodeURIComponent(search)}`;
   prefetchAbortController = new AbortController();
   prefetchPromise = api(url, { signal: prefetchAbortController.signal })
     .then((data) => {
@@ -873,6 +906,12 @@ async function refreshAllChannelStats() {
 }
 
 async function refreshRSS() {
+  const btn = document.getElementById("btn-refresh-rss");
+  const icon = btn?.querySelector(".btn-icon");
+  icon?.classList.add("spinning");
+  btn?.setAttribute("disabled", "true");
+  btn?.setAttribute("aria-busy", "true");
+
   showToast("Refresh RSS en cours...", "info");
   try {
     await api("/refresh", { method: "POST" });
@@ -881,6 +920,10 @@ async function refreshRSS() {
     loadStats();
   } catch (err) {
     showToast("Erreur lors du refresh", "error");
+  } finally {
+    icon?.classList.remove("spinning");
+    btn?.removeAttribute("disabled");
+    btn?.removeAttribute("aria-busy");
   }
 }
 
@@ -1137,7 +1180,6 @@ function extractVideoId(url) {
 
 let ytPlayer = null;
 let ytReady = false;
-let pendingVideoId = null;
 let ytCallbacks = [];
 
 function loadYTAPI() {
@@ -1165,39 +1207,38 @@ function openPlayer(videoId) {
   backdrop.classList.add("open");
   document.body.style.overflow = "hidden";
 
-  const container = document.getElementById("playerVid");
-  container.innerHTML = "";
-
   if (ytPlayer) { ytPlayer.destroy(); ytPlayer = null; }
+
+  const container = document.getElementById("playerVid");
+  // YT.Player replaces the target div with an iframe; destroy() recreates a bare
+  // div that loses its CSS class. Restore it so aspect-ratio keeps working.
+  container.className = "player-vid";
+  container.innerHTML = "";
 
   // Small delay to let backdrop transition complete (YouTube API needs visible container)
   setTimeout(() => {
     ytPlayer = new YT.Player("playerVid", {
       videoId,
+      width: "100%",
+      height: "100%",
       playerVars: {
         autoplay: 1,
-        controls: 0,
+        controls: 1,
         rel: 0,
         iv_load_policy: 3,
         modestbranding: 1,
-        fs: 0,
         playsinline: 1,
       },
       events: {
-      onReady: onPlayerReady,
-      onStateChange: onPlayerStateChange,
-      onError: onPlayerError,
+        onReady: onPlayerReady,
+        onStateChange: onPlayerStateChange,
+        onError: onPlayerError,
       },
     });
   }, 350);
 }
 
 function onPlayerReady() {
-  try {
-    ytPlayer.setPlaybackRate(2);
-  } catch (e) {
-    // Some videos don't support 2x
-  }
   ytPlayer.playVideo();
 }
 
@@ -1206,53 +1247,27 @@ function onPlayerError(e) {
   showToast("Erreur de lecture vidéo (code " + e.data + ")", "error");
 }
 
-let progressInterval = null;
-
 function onPlayerStateChange(e) {
-  const playBtn = document.getElementById("pcPlay");
   const box = document.getElementById("playerBox");
   if (e.data === YT.PlayerState.PLAYING) {
     box.classList.add("playing");
-    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
-    if (progressInterval) clearInterval(progressInterval);
-    progressInterval = setInterval(updateProgress, 250);
-  } else if (e.data === YT.PlayerState.PAUSED) {
+  } else {
     box.classList.remove("playing");
-    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
-    if (progressInterval) clearInterval(progressInterval);
-    progressInterval = null;
-  } else if (e.data === YT.PlayerState.ENDED) {
-    box.classList.remove("playing");
-    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
-    if (progressInterval) clearInterval(progressInterval);
-    progressInterval = null;
-  } else if (e.data === YT.PlayerState.CUED) {
-    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
   }
-}
-
-function updateProgress() {
-  if (!ytPlayer || !ytPlayer.getCurrentTime) return;
-  const dur = ytPlayer.getDuration() || 1;
-  const cur = ytPlayer.getCurrentTime();
-  const pct = (cur / dur) * 100;
-  document.getElementById("pcFill").style.width = pct + "%";
-  document.getElementById("pcThumb").style.left = pct + "%";
-  document.getElementById("pcTime").textContent = fmtTime(cur) + " / " + fmtTime(dur);
-}
-
-function fmtTime(t) {
-  if (!t || isNaN(t)) return "0:00";
-  const m = Math.floor(t / 60);
-  const s = Math.floor(t % 60);
-  return m + ":" + (s < 10 ? "0" : "") + s;
 }
 
 function closePlayer() {
   document.getElementById("playerBackdrop").classList.remove("open");
   document.body.style.overflow = "";
-  if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
-  if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+  // Destroy the YT player and clear the container so the invisible iframe
+  // doesn't sit on top of the page and intercept clicks on video cards.
+  if (ytPlayer) {
+    try { ytPlayer.destroy(); } catch (e) { /* ignore */ }
+    ytPlayer = null;
+  }
+  const container = document.getElementById("playerVid");
+  container.innerHTML = "";
+  container.className = "player-vid";
 }
 
 function playVideo(url) {
@@ -1280,55 +1295,11 @@ function playVideo(url) {
 // --- Player control bindings ---
 document.addEventListener("DOMContentLoaded", () => {
   const backdrop = document.getElementById("playerBackdrop");
-  const playBtn = document.getElementById("pcPlay");
   const closeBtn = document.getElementById("playerClose");
-  const progress = document.getElementById("pcProgress");
-  const muteBtn = document.getElementById("pcMute");
-  const fsBtn = document.getElementById("pcFs");
-  const speedBtn = document.getElementById("pcSpeed");
 
   closeBtn.addEventListener("click", closePlayer);
   backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closePlayer(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePlayer(); });
-
-  playBtn.addEventListener("click", () => {
-    if (!ytPlayer) return;
-    ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? ytPlayer.pauseVideo() : ytPlayer.playVideo();
-  });
-
-  progress.addEventListener("click", (e) => {
-    if (!ytPlayer) return;
-    const rect = progress.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    ytPlayer.seekTo(pct * ytPlayer.getDuration(), true);
-  });
-
-  let muted = false;
-  muteBtn.addEventListener("click", () => {
-    if (!ytPlayer) return;
-    muted = !muted;
-    ytPlayer[muted ? "mute" : "unMute"]();
-  });
-
-  const speeds = [0.5, 1, 1.5, 2, 2.5, 3];
-  let speedIdx = 3;
-  speedBtn.addEventListener("click", () => {
-    if (!ytPlayer) return;
-    speedIdx = (speedIdx + 1) % speeds.length;
-    ytPlayer.setPlaybackRate(speeds[speedIdx]);
-    speedBtn.textContent = speeds[speedIdx] + "x";
-  });
-
-  fsBtn.addEventListener("click", () => {
-    const box = document.getElementById("playerBox");
-    if (!document.fullscreenElement) {
-      if (box.requestFullscreen) box.requestFullscreen();
-    } else {
-      if (document.exitFullscreen) document.exitFullscreen();
-    }
-  });
-
-  document.addEventListener("fullscreenchange", () => {});
 });
 
 function escapeJs(str) {
