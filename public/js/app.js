@@ -1184,9 +1184,9 @@ function openPlayer(videoId) {
         playsinline: 1,
       },
       events: {
-        onReady: onPlayerReady,
-        onStateChange: onPlayerStateChange,
-        onError: onPlayerError,
+      onReady: onPlayerReady,
+      onStateChange: onPlayerStateChange,
+      onError: onPlayerError,
       },
     });
   }, 350);
