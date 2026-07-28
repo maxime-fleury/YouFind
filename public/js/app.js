@@ -1136,11 +1136,111 @@ function extractVideoId(url) {
   return fallback?.length === 11 ? fallback : null;
 }
 
+let ytPlayer = null;
+let ytReady = false;
+let pendingVideoId = null;
+
+function loadYTAPI() {
+  if (window.YT) { ytReady = true; return; }
+  const tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+}
+loadYTAPI();
+
+window.onYouTubeIframeAPIReady = () => {
+  ytReady = true;
+  if (pendingVideoId) {
+    openPlayer(pendingVideoId);
+    pendingVideoId = null;
+  }
+};
+
+function openPlayer(videoId) {
+  const backdrop = document.getElementById("playerBackdrop");
+  backdrop.classList.add("open");
+  document.body.style.overflow = "hidden";
+
+  const container = document.getElementById("playerVid");
+  container.innerHTML = "";
+
+  if (ytPlayer) { ytPlayer.destroy(); ytPlayer = null; }
+
+  ytPlayer = new YT.Player("playerVid", {
+    videoId,
+    playerVars: {
+      controls: 0,
+      rel: 0,
+      showinfo: 0,
+      iv_load_policy: 3,
+      modestbranding: 1,
+      fs: 0,
+      playsinline: 1,
+    },
+    events: {
+      onReady: onPlayerReady,
+      onStateChange: onPlayerStateChange,
+    },
+  });
+}
+
+function onPlayerReady() {
+  ytPlayer.setPlaybackRate(2);
+  ytPlayer.playVideo();
+}
+
+let progressInterval = null;
+
+function onPlayerStateChange(e) {
+  const playBtn = document.getElementById("pcPlay");
+  const box = document.getElementById("playerBox");
+  if (e.data === YT.PlayerState.PLAYING) {
+    box.classList.add("playing");
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+    if (progressInterval) clearInterval(progressInterval);
+    progressInterval = setInterval(updateProgress, 250);
+  } else if (e.data === YT.PlayerState.PAUSED) {
+    box.classList.remove("playing");
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    if (progressInterval) clearInterval(progressInterval);
+    progressInterval = null;
+  } else if (e.data === YT.PlayerState.ENDED) {
+    box.classList.remove("playing");
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    if (progressInterval) clearInterval(progressInterval);
+    progressInterval = null;
+  } else if (e.data === YT.PlayerState.CUED) {
+    playBtn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  }
+}
+
+function updateProgress() {
+  if (!ytPlayer || !ytPlayer.getCurrentTime) return;
+  const dur = ytPlayer.getDuration() || 1;
+  const cur = ytPlayer.getCurrentTime();
+  const pct = (cur / dur) * 100;
+  document.getElementById("pcFill").style.width = pct + "%";
+  document.getElementById("pcThumb").style.left = pct + "%";
+  document.getElementById("pcTime").textContent = fmtTime(cur) + " / " + fmtTime(dur);
+}
+
+function fmtTime(t) {
+  if (!t || isNaN(t)) return "0:00";
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return m + ":" + (s < 10 ? "0" : "") + s;
+}
+
+function closePlayer() {
+  document.getElementById("playerBackdrop").classList.remove("open");
+  document.body.style.overflow = "";
+  if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo();
+  if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+}
+
 function playVideo(url) {
   markVideoSeen(url);
 
-  // Update the clicked card immediately so the user gets visual feedback
-  // without waiting for a full re-render.
   const card = document.querySelector(`.video-card[data-video-url="${CSS.escape(url)}"]`);
   if (card) {
     card.classList.add("seen");
@@ -1157,13 +1257,59 @@ function playVideo(url) {
   const videoId = extractVideoId(url);
   if (!videoId) return showToast("URL de vidéo invalide", "error");
 
-  const iframe = document.getElementById("player-iframe");
-  iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-  playerModal.show();
+  if (!ytReady) {
+    pendingVideoId = videoId;
+    return;
+  }
+  openPlayer(videoId);
 }
 
-playerModal._element.addEventListener("hidden.bs.modal", () => {
-  document.getElementById("player-iframe").src = "";
+// --- Player control bindings ---
+document.addEventListener("DOMContentLoaded", () => {
+  const backdrop = document.getElementById("playerBackdrop");
+  const playBtn = document.getElementById("pcPlay");
+  const closeBtn = document.getElementById("playerClose");
+  const progress = document.getElementById("pcProgress");
+  const muteBtn = document.getElementById("pcMute");
+  const fsBtn = document.getElementById("pcFs");
+  const speedBtn = document.getElementById("pcSpeed");
+
+  closeBtn.addEventListener("click", closePlayer);
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closePlayer(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePlayer(); });
+
+  playBtn.addEventListener("click", () => {
+    if (!ytPlayer) return;
+    ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? ytPlayer.pauseVideo() : ytPlayer.playVideo();
+  });
+
+  progress.addEventListener("click", (e) => {
+    if (!ytPlayer) return;
+    const rect = progress.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    ytPlayer.seekTo(pct * ytPlayer.getDuration(), true);
+  });
+
+  let muted = false;
+  muteBtn.addEventListener("click", () => {
+    if (!ytPlayer) return;
+    muted = !muted;
+    ytPlayer[muted ? "mute" : "unMute"]();
+  });
+
+  const speeds = [0.5, 1, 1.5, 2, 2.5, 3];
+  let speedIdx = 3;
+  speedBtn.addEventListener("click", () => {
+    if (!ytPlayer) return;
+    speedIdx = (speedIdx + 1) % speeds.length;
+    ytPlayer.setPlaybackRate(speeds[speedIdx]);
+    speedBtn.textContent = speeds[speedIdx] + "x";
+  });
+
+  fsBtn.addEventListener("click", () => {
+    const box = document.getElementById("playerBox");
+    if (box.requestFullscreen) box.requestFullscreen();
+  });
 });
 
 function escapeJs(str) {

@@ -456,16 +456,35 @@
   <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
 
   <!-- Video player modal -->
-  <div class="modal fade" id="playerModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-      <div class="modal-content" style="background:#000;border:none">
-        <div class="modal-header border-0" style="position:absolute;top:0;right:0;z-index:1">
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" style="filter: brightness(2)"></button>
-        </div>
-        <div class="modal-body p-0">
-          <div style="position:relative;padding-top:56.25%">
-            <iframe id="player-iframe" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
-                    allow="autoplay;encrypted-media" allowfullscreen></iframe>
+  <div class="player-backdrop" id="playerBackdrop">
+    <div class="player-wrap">
+      <button class="player-close" id="playerClose">✕</button>
+      <div class="player-box" id="playerBox">
+        <div class="player-glow"></div>
+        <div class="player-vid" id="playerVid"></div>
+        <div class="player-controls" id="playerControls">
+          <div class="pc-progress" id="pcProgress">
+            <div class="pc-fill" id="pcFill"></div>
+            <div class="pc-thumb" id="pcThumb"></div>
+          </div>
+          <div class="pc-row">
+            <button class="pc-btn pc-play" id="pcPlay">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <span class="pc-time" id="pcTime">0:00 / 0:00</span>
+            <div class="pc-spacer"></div>
+            <div class="pc-speed-wrap">
+              <button class="pc-btn pc-speed" id="pcSpeed">2x</button>
+            </div>
+            <div class="pc-vol-wrap">
+              <button class="pc-btn" id="pcMute">
+                <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+              </button>
+              <div class="pc-vol-track"><div class="pc-vol-fill" id="pcVolFill"></div></div>
+            </div>
+            <button class="pc-btn" id="pcFs">
+              <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+            </button>
           </div>
         </div>
       </div>
