@@ -15,7 +15,6 @@ let currentVideoFilter = "";
 const VIDEO_PAGE_SIZE = 60;
 const rejectModal = new bootstrap.Modal(document.getElementById("rejectModal"));
 const addChannelModal = new bootstrap.Modal(document.getElementById("addChannelModal"));
-const playerModal = new bootstrap.Modal(document.getElementById("playerModal"));
 const channelTopicsModal = new bootstrap.Modal(document.getElementById("channelTopicsModal"));
 const channelDetailModal = new bootstrap.Modal(document.getElementById("channelDetailModal"));
 
