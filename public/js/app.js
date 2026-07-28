@@ -1138,22 +1138,27 @@ function extractVideoId(url) {
 let ytPlayer = null;
 let ytReady = false;
 let pendingVideoId = null;
+let ytCallbacks = [];
 
 function loadYTAPI() {
   if (window.YT) { ytReady = true; return; }
+  const prev = window.onYouTubeIframeAPIReady;
+  window.onYouTubeIframeAPIReady = () => {
+    ytReady = true;
+    ytCallbacks.forEach(fn => fn());
+    ytCallbacks = [];
+    if (prev) prev();
+  };
   const tag = document.createElement("script");
   tag.src = "https://www.youtube.com/iframe_api";
   document.head.appendChild(tag);
 }
 loadYTAPI();
 
-window.onYouTubeIframeAPIReady = () => {
-  ytReady = true;
-  if (pendingVideoId) {
-    openPlayer(pendingVideoId);
-    pendingVideoId = null;
-  }
-};
+function whenYTReady(fn) {
+  if (ytReady) { fn(); return; }
+  ytCallbacks.push(fn);
+}
 
 function openPlayer(videoId) {
   const backdrop = document.getElementById("playerBackdrop");
@@ -1165,23 +1170,26 @@ function openPlayer(videoId) {
 
   if (ytPlayer) { ytPlayer.destroy(); ytPlayer = null; }
 
-  ytPlayer = new YT.Player("playerVid", {
-    videoId,
-    playerVars: {
-      autoplay: 1,
-      controls: 0,
-      rel: 0,
-      iv_load_policy: 3,
-      modestbranding: 1,
-      fs: 0,
-      playsinline: 1,
-    },
-    events: {
-      onReady: onPlayerReady,
-      onStateChange: onPlayerStateChange,
-      onError: onPlayerError,
-    },
-  });
+  // Small delay to let backdrop transition complete (YouTube API needs visible container)
+  setTimeout(() => {
+    ytPlayer = new YT.Player("playerVid", {
+      videoId,
+      playerVars: {
+        autoplay: 1,
+        controls: 0,
+        rel: 0,
+        iv_load_policy: 3,
+        modestbranding: 1,
+        fs: 0,
+        playsinline: 1,
+      },
+      events: {
+        onReady: onPlayerReady,
+        onStateChange: onPlayerStateChange,
+        onError: onPlayerError,
+      },
+    });
+  }, 350);
 }
 
 function onPlayerReady() {
@@ -1266,11 +1274,7 @@ function playVideo(url) {
   const videoId = extractVideoId(url);
   if (!videoId) return showToast("URL de vidéo invalide", "error");
 
-  if (!ytReady) {
-    pendingVideoId = videoId;
-    return;
-  }
-  openPlayer(videoId);
+  whenYTReady(() => openPlayer(videoId));
 }
 
 // --- Player control bindings ---
