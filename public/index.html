@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="YouFind - Ton feed vidéo personnel, sans algorithme. Découvre et suis des créateurs par thème.">
+  <meta name="theme-color" content="#0a0118">
+  <title>YouFind — Ton feed, tes règles</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="/css/style.css" rel="stylesheet">
+</head>
+<body>
+
+  <nav class="navbar navbar-expand-lg glass-nav">
+    <div class="container-fluid px-4">
+      <a class="navbar-brand d-flex align-items-center gap-2" href="#" onclick="navigateTo('videos')">
+        <img src="/favicon.svg" alt="YouFind" class="brand-logo" width="36" height="36">
+        <span class="brand-text">YouFind</span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
+        <i class="bi bi-list text-white fs-4"></i>
+      </button>
+      <div class="collapse navbar-collapse" id="navContent">
+        <ul class="navbar-nav ms-auto gap-1">
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="home">
+              <i class="bi bi-house-heart"></i> Accueil
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="videos">
+              <i class="bi bi-camera-reels"></i> Videos
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="channels">
+              <i class="bi bi-collection-play"></i> Chaines
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="discover">
+              <i class="bi bi-compass"></i> Decouvrir
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="related">
+              <i class="bi bi-diagram-3"></i> Similaires
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="topics">
+              <i class="bi bi-tags"></i> Topics
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="feedback">
+              <i class="bi bi-journal-text"></i> Feedback
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link btn btn-nav" data-page="settings">
+              <i class="bi bi-gear"></i> Settings
+            </button>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <main class="container-fluid px-4 py-4">
+
+    <div id="stats-bar" class="row g-3 mb-4"></div>
+
+    <div id="page-home" class="page-content">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="section-title"><i class="bi bi-house-heart"></i> Accueil</h2>
+      </div>
+      <div class="row g-4">
+        <div class="col-lg-8">
+          <h5 class="text-purple-light mb-3"><i class="bi bi-camera-reels"></i> Videos recentes</h5>
+          <div id="home-recent-videos" class="row g-3"></div>
+        </div>
+        <div class="col-lg-4">
+          <div class="mb-4">
+            <h5 class="text-purple-light mb-3"><i class="bi bi-hourglass-split"></i> En attente</h5>
+            <div id="home-pending"></div>
+          </div>
+          <div>
+            <h5 class="text-purple-light mb-3"><i class="bi bi-star-fill"></i> Top chaines</h5>
+            <div id="home-top-channels"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-videos" class="page-content d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="section-title"><i class="bi bi-camera-reels"></i> Videos recentes</h2>
+        <div class="d-flex gap-2 align-items-center">
+          <select id="video-sort" class="form-select form-select-glass" onchange="loadVideos(true)" style="width:auto">
+            <option value="newest">Plus recentes</option>
+            <option value="views">Plus vues</option>
+            <option value="engagement">Engagement</option>
+            <option value="score">Score LLM</option>
+          </select>
+          <select id="video-topic-filter" class="form-select form-select-glass" onchange="loadVideos(true)" style="width:auto">
+            <option value="">Tous les topics</option>
+          </select>
+          <button class="btn btn-glass" onclick="refreshRSS()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh RSS
+          </button>
+        </div>
+      </div>
+      <div id="videos-grid" class="row g-3"></div>
+    </div>
+
+    <div id="page-channels" class="page-content d-none">
+      <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="section-title mb-0"><i class="bi bi-collection-play"></i> Mes chaines</h2>
+        <div class="d-flex gap-2 align-items-center" style="flex:1;min-width:200px">
+          <div class="search-wrap" style="flex:1">
+            <i class="bi bi-search"></i>
+            <input type="text" id="channel-search" class="form-control form-control-glass search-input" placeholder="Chercher une chaine..." oninput="filterChannels()">
+          </div>
+          <button class="btn btn-primary-glass" onclick="addChannelModal.show()" style="white-space:nowrap">
+            <i class="bi bi-plus-lg"></i> Ajouter
+          </button>
+        </div>
+        <select id="channel-filter" class="form-select form-select-glass" onchange="loadChannels()" style="width:auto;min-width:120px">
+          <option value="pending" selected>En attente</option>
+          <option value="validated">Validees</option>
+          <option value="">Toutes</option>
+        </select>
+        <button class="btn btn-glass" onclick="refreshAllChannelStats()" id="refresh-stats-btn" title="Mettre a jour les stats de toutes les chaines">
+          <i class="bi bi-arrow-clockwise"></i> Update stats
+        </button>
+      </div>
+      <div id="channels-list"></div>
+    </div>
+
+    <div id="page-discover" class="page-content d-none">
+      <h2 class="section-title mb-3"><i class="bi bi-compass"></i> Decouvrir de nouvelles chaines</h2>
+      <div id="discover-method-badge" class="mb-3"></div>
+      <div class="glass-card p-4 mb-4">
+        <div class="row g-3 align-items-end">
+          <div class="col-md-5">
+            <label class="form-label text-purple-light">Rechercher un topic</label>
+            <input type="text" id="discover-input" class="form-control form-control-glass" 
+                   placeholder="ex: machine learning, cuisine japonaise, dev web...">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label text-purple-light">Offset</label>
+            <input type="number" id="discover-offset" class="form-control form-control-glass" value="0" min="0" step="10">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label text-purple-light">Nb resultats</label>
+            <select id="discover-count" class="form-select form-select-glass">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-primary-glass w-100" onclick="runDiscovery()">
+              <i class="bi bi-search"></i> Rechercher
+            </button>
+          </div>
+        </div>
+        <div id="discover-status" class="mt-3"></div>
+      </div>
+      <div id="discover-results"></div>
+      <div class="glass-card p-4 mt-4">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <h5 class="text-purple-light mb-1"><i class="bi bi-robot"></i> Score LLM automatique</h5>
+            <p class="text-muted mb-3">Score toutes les chaines en attente avec le LLM configure.</p>
+          </div>
+          <div id="llm-badge" class="text-end"></div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-primary-glass" onclick="scoreAll()">
+            <i class="bi bi-stars"></i> Score all pending
+          </button>
+          <button class="btn btn-glass" onclick="scoreAllUnscored()">
+            <i class="bi bi-stars"></i> Score all unscored
+          </button>
+          <button class="btn btn-glass" onclick="rescoreAll()" style="border-color:var(--accent-yellow)">
+            <i class="bi bi-arrow-clockwise"></i> Rescore all (0-100)
+          </button>
+        </div>
+        <div id="score-status" class="mt-3"></div>
+      </div>
+    </div>
+
+    <div id="page-related" class="page-content d-none">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="section-title"><i class="bi bi-diagram-3"></i> Chaines similaires</h2>
+        <div class="d-flex gap-2 align-items-center">
+          <span id="related-badge" class="status-badge pending" style="display:none">Français seulement</span>
+          <button class="btn btn-primary-glass" onclick="runRelatedDiscovery()" id="related-btn">
+            <i class="bi bi-search"></i> Explorer les similaires
+          </button>
+        </div>
+      </div>
+      <div class="glass-card p-4 mb-4" id="related-info">
+        <p class="text-muted mb-0">
+          <i class="bi bi-info-circle"></i>
+          Explore les chaines similaires a toutes tes chaines validees. 
+          Les resultats sont filtres pour ne montrer que les chaines francaises.
+          Les chaines deja dans ta liste (validees, en attente, rejetees) sont ignorees.
+        </p>
+      </div>
+      <div id="related-status" class="mb-3"></div>
+      <div id="related-results"></div>
+    </div>
+
+    <div id="page-topics" class="page-content d-none">
+      <h2 class="section-title mb-3"><i class="bi bi-tags"></i> Topics</h2>
+      <div class="glass-card p-4 mb-4">
+        <div class="row g-3">
+          <div class="col-md-5">
+            <input type="text" id="topic-nom" class="form-control form-control-glass" placeholder="Nom du topic">
+          </div>
+          <div class="col-md-5">
+            <input type="text" id="topic-desc" class="form-control form-control-glass" placeholder="Description (optionnel)">
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-primary-glass w-100" onclick="addTopic()">
+              <i class="bi bi-plus-lg"></i> Ajouter
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="topics-list"></div>
+    </div>
+
+    <div id="page-feedback" class="page-content d-none">
+      <h2 class="section-title mb-3"><i class="bi bi-journal-text"></i> Historique des rejets</h2>
+      <div id="feedback-list"></div>
+    </div>
+
+    <div id="page-settings" class="page-content d-none">
+      <h2 class="section-title mb-3"><i class="bi bi-gear"></i> Settings</h2>
+
+      <div class="glass-card p-4 mb-4">
+        <h5 class="text-purple-light mb-3"><i class="bi bi-collection-play"></i> YouTube</h5>
+        <div class="row g-3">
+          <div class="col-md-12">
+            <label class="form-label">API Key</label>
+            <input type="password" id="set-youtube_api_key" class="form-control form-control-glass" 
+                   placeholder="AIza...">
+            <div class="form-text text-muted">Google Cloud Console > YouTube Data API v3</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4 mb-4">
+        <h5 class="text-purple-light mb-3"><i class="bi bi-robot"></i> LLM Provider</h5>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">Provider</label>
+            <select id="set-llm_provider" class="form-select form-select-glass" onchange="toggleLLMFields()">
+              <option value="ollama">Ollama (local)</option>
+              <option value="lmstudio">LM Studio (local)</option>
+              <option value="openrouter">OpenRouter (cloud)</option>
+            </select>
+          </div>
+
+          <div class="col-md-12" id="ollama-fields">
+            <div class="row g-3">
+              <div class="col-md-8">
+                <label class="form-label">Ollama URL</label>
+                <input type="text" id="set-ollama_url" class="form-control form-control-glass" placeholder="http://localhost:11434">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Model</label>
+                <input type="text" id="set-ollama_model" class="form-control form-control-glass" placeholder="llama3.2:3b">
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-12 d-none" id="lmstudio-fields">
+            <div class="row g-3">
+              <div class="col-md-8">
+                <label class="form-label">LM Studio URL</label>
+                <input type="text" id="set-lmstudio_url" class="form-control form-control-glass" placeholder="http://localhost:1234">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Model</label>
+                <input type="text" id="set-lmstudio_model" class="form-control form-control-glass" placeholder="default">
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-12 d-none" id="openrouter-fields">
+            <div class="row g-3">
+              <div class="col-md-8">
+                <label class="form-label">API Key</label>
+                <input type="password" id="set-openrouter_key" class="form-control form-control-glass" placeholder="sk-or-...">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Model</label>
+                <input type="text" id="set-openrouter_model" class="form-control form-control-glass" placeholder="meta-llama/llama-3.1-8b-instruct:free">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 d-flex align-items-center gap-3">
+          <button class="btn btn-primary-glass" onclick="saveSettings()">
+            <i class="bi bi-check-lg"></i> Sauvegarder
+          </button>
+          <div id="llm-health" class="text-end flex-grow-1"></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-4">
+        <h5 class="text-purple-light mb-3"><i class="bi bi-info-circle"></i> Status</h5>
+        <div id="settings-status"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content glass-card-dark">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-purple-light">Rejeter la chaine</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted mb-2" id="reject-channel-name"></p>
+          <div class="mb-3 d-flex flex-wrap gap-2" id="reject-pills">
+            <span class="reject-pill" data-reason="Anglais / Non Français" onclick="toggleRejectPill(this)">Anglais / Non Français</span>
+            <span class="reject-pill" data-reason="Low quality" onclick="toggleRejectPill(this)">Low quality</span>
+            <span class="reject-pill" data-reason="Pas interessant, hors topic" onclick="toggleRejectPill(this)">Pas interessant, hors topic</span>
+            <span class="reject-pill" data-reason="Shorts" onclick="toggleRejectPill(this)">Shorts</span>
+            <span class="reject-pill" data-reason="Pas active" onclick="toggleRejectPill(this)">Pas active</span>
+          </div>
+          <textarea id="reject-reason" class="form-control form-control-glass" rows="2" 
+                    placeholder="Raison du rejet (optionnel)"></textarea>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Annuler</button>
+          <button type="button" class="btn btn-danger-glass" onclick="confirmReject()">
+            <i class="bi bi-x-lg"></i> Rejeter
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addChannelModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content glass-card-dark">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-purple-light">Ajouter des chaines</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label text-purple-light">Lien YouTube ou nom</label>
+            <input type="text" id="add-ch-input" class="form-control form-control-glass" 
+                   placeholder="https://youtube.com/watch?v=..., @MrBeast, UC..., ou un nom"
+                   oninput="previewChannel()">
+            <div class="form-text text-muted">Colle un lien de chaine, video, handle, ou cherche par nom (0 credit API)</div>
+          </div>
+          <div id="add-ch-preview" class="d-none"></div>
+
+          <hr class="my-4" style="border-color:var(--glass-border)">
+
+          <details>
+            <summary class="text-purple-light" style="cursor:pointer;font-size:0.88rem;font-weight:500">
+              <i class="bi bi-list-ul"></i> Import en lot
+            </summary>
+            <div class="mt-3">
+              <textarea id="add-batch-input" class="form-control form-control-glass" rows="4"
+                        placeholder="https://youtube.com/@MrBeast&#10;https://youtube.com/channel/UC...&#10;https://www.youtube.com/watch?v=...&#10;meme du texte avec des liens dedans"></textarea>
+              <div class="form-text text-muted">Colle du texte, on detecte tous les liens YouTube automatiquement</div>
+              <button class="btn btn-primary-glass mt-2" onclick="batchImport()" id="add-batch-btn">
+                <i class="bi bi-upload"></i> Importer
+              </button>
+              <div id="add-batch-status" class="mt-2"></div>
+            </div>
+          </details>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Fermer</button>
+          <button type="button" class="btn btn-primary-glass" onclick="addChannel()" id="add-ch-btn" disabled>
+            <i class="bi bi-plus-lg"></i> Ajouter
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="channelTopicsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content glass-card-dark">
+        <div class="modal-header border-0">
+          <h5 class="modal-title text-purple-light"><i class="bi bi-tags"></i> Gerer les topics</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted mb-3" id="channel-topics-channel-name"></p>
+          <div id="channel-topics-list" class="topic-picker-list d-flex flex-wrap gap-2"></div>
+          <div id="channel-topics-empty" class="d-none text-muted text-center py-3" style="font-size:0.85rem">
+            Aucun topic disponible. Ajoutez-en un dans l'onglet Topics.
+          </div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Annuler</button>
+          <button type="button" class="btn btn-primary-glass" onclick="saveChannelTopics()">
+            <i class="bi bi-check-lg"></i> Sauvegarder
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="channelDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content glass-card-dark">
+        <div class="modal-header border-0">
+          <div class="d-flex align-items-center gap-3">
+            <img id="detail-ch-thumb" src="" alt="" class="rounded-circle" style="width:56px;height:56px;object-fit:cover;background:var(--purple-800)">
+            <div>
+              <h5 class="modal-title text-purple-light mb-0" id="detail-ch-name"></h5>
+              <div class="text-muted" style="font-size:0.82rem" id="detail-ch-meta"></div>
+            </div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div id="detail-ch-summary" class="mb-3"></div>
+          <div class="mb-3" id="detail-ch-topics"></div>
+          <h6 class="text-purple-light mb-3"><i class="bi bi-camera-reels"></i> Videos recentes</h6>
+          <div id="detail-ch-videos" class="row g-3 mb-4"></div>
+          <h6 class="text-purple-light mb-3"><i class="bi bi-people"></i> Chaines similaires</h6>
+          <div id="detail-ch-related"></div>
+        </div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Fermer</button>
+          <a class="btn btn-glass" id="detail-ch-link" href="#" target="_blank">
+            <i class="bi bi-youtube"></i> Voir sur YouTube
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+  <!-- Video player modal -->
+  <div class="modal fade" id="playerModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+      <div class="modal-content" style="background:#000;border:none">
+        <div class="modal-header border-0" style="position:absolute;top:0;right:0;z-index:1">
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" style="filter: brightness(2)"></button>
+        </div>
+        <div class="modal-body p-0">
+          <div style="position:relative;padding-top:56.25%">
+            <iframe id="player-iframe" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
+                    allow="autoplay;encrypted-media" allowfullscreen></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="app-footer">
+    YouFind — Ton feed, tes règles. Zéro algorithme, zéro pub.
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/mark.min.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

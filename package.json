@@ -1,0 +1,13 @@
+{
+  "name": "youfind",
+  "module": "src/server.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot src/server.js",
+    "start": "bun src/server.js",
+    "refresh": "bun src/rss.js",
+    "cron": "bun src/cron.js",
+    "backup": "bun scripts/backup-db.js"
+  }
+}
