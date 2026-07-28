@@ -1168,9 +1168,9 @@ function openPlayer(videoId) {
   ytPlayer = new YT.Player("playerVid", {
     videoId,
     playerVars: {
+      autoplay: 1,
       controls: 0,
       rel: 0,
-      showinfo: 0,
       iv_load_policy: 3,
       modestbranding: 1,
       fs: 0,
@@ -1179,13 +1179,23 @@ function openPlayer(videoId) {
     events: {
       onReady: onPlayerReady,
       onStateChange: onPlayerStateChange,
+      onError: onPlayerError,
     },
   });
 }
 
 function onPlayerReady() {
-  ytPlayer.setPlaybackRate(2);
+  try {
+    ytPlayer.setPlaybackRate(2);
+  } catch (e) {
+    // Some videos don't support 2x
+  }
   ytPlayer.playVideo();
+}
+
+function onPlayerError(e) {
+  console.error("[Player] YouTube error:", e.data);
+  showToast("Erreur de lecture vidéo (code " + e.data + ")", "error");
 }
 
 let progressInterval = null;
@@ -1307,8 +1317,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   fsBtn.addEventListener("click", () => {
     const box = document.getElementById("playerBox");
-    if (box.requestFullscreen) box.requestFullscreen();
+    if (!document.fullscreenElement) {
+      if (box.requestFullscreen) box.requestFullscreen();
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
+    }
   });
+
+  document.addEventListener("fullscreenchange", () => {});
 });
 
 function escapeJs(str) {

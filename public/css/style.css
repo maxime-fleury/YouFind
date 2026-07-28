@@ -981,9 +981,10 @@ mark {
   display: flex; flex-direction: column; gap: 8px;
   opacity: 0; transform: translateY(8px);
   transition: opacity .3s, transform .3s;
+  pointer-events: none;
 }
 .player-box:hover .player-controls,
-.player-box.paused .player-controls { opacity: 1; transform: translateY(0); }
+.player-box.paused .player-controls { opacity: 1; transform: translateY(0); pointer-events: auto; }
 
 .pc-progress {
   position: relative;
