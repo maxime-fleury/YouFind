@@ -66,6 +66,7 @@ function serveStatic(pathname) {
 
 let isRefreshingRSS = false;
 let isRefreshingStats = false;
+const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 
 // Simple in-memory rate limiter: 120 requests per minute per IP
 const RATE_LIMIT = 120;
@@ -321,12 +322,32 @@ const server = Bun.serve({
           return json({ ok: true, message: "Refresh already in progress" });
         }
         isRefreshingRSS = true;
-        refreshAllChannels()
-          .then((results) => console.log(`[Refresh] Completed: ${results.length} channels`))
-          .catch((e) => console.error("[Refresh] Error:", e.message))
+        refreshProgress.total = 0;
+        refreshProgress.completed = 0;
+        refreshProgress.errors = 0;
+        refreshProgress.current = "";
+        refreshProgress.status = "running";
+        refreshAllChannels((p) => {
+          refreshProgress.total = p.total;
+          if (p.status === "done") refreshProgress.completed++;
+          else if (p.status === "error") refreshProgress.errors++;
+          refreshProgress.current = p.nom;
+        })
+          .then((results) => {
+            refreshProgress.status = "done";
+            console.log(`[Refresh] Completed: ${results.length} channels`);
+          })
+          .catch((e) => {
+            refreshProgress.status = "error";
+            console.error("[Refresh] Error:", e.message);
+          })
           .finally(() => { isRefreshingRSS = false; });
         return json({ ok: true, message: "Refresh started in background" });
       },
+    },
+
+    "/api/refresh/status": {
+      GET: () => json(refreshProgress),
     },
 
     "/api/channels/refresh-stats": {

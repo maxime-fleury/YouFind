@@ -417,6 +417,21 @@
     </div>
   </div>
 
+  <!-- Refresh progress modal -->
+  <div id="refreshProgressModal" class="modal-overlay d-none">
+    <div class="glass-card" style="max-width:480px;margin:20vh auto;padding:2rem;text-align:center">
+      <div class="spinner-glass mb-3" style="width:40px;height:40px;border-width:4px;margin:0 auto"></div>
+      <h5 class="mb-2">Rafraîchissement RSS</h5>
+      <p class="text-muted small mb-3" id="refresh-progress-text">Initialisation...</p>
+      <div class="progress" style="height:8px;border-radius:99px;background:var(--bg-tertiary)">
+        <div class="progress-bar" id="refresh-progress-bar"
+             style="width:0%;border-radius:99px;background:linear-gradient(90deg,var(--accent-purple),var(--accent-pink));transition:width 0.3s ease">
+        </div>
+      </div>
+      <small class="text-muted mt-2 d-block" id="refresh-progress-detail"></small>
+    </div>
+  </div>
+
   <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
 
   <!-- Video player modal -->

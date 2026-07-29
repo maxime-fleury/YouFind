@@ -928,19 +928,54 @@ async function refreshRSS() {
   btn?.setAttribute("disabled", "true");
   btn?.setAttribute("aria-busy", "true");
 
-  showToast("Refresh RSS en cours...", "info");
   try {
     await api("/refresh", { method: "POST" });
-    showToast("Refresh lance en arriere-plan", "info");
-    loadVideos(true);
-    loadStats();
   } catch (err) {
-    showToast("Erreur lors du refresh", "error");
-  } finally {
+    showToast("Erreur lors du demarrage du refresh", "error");
     icon?.classList.remove("spinning");
     btn?.removeAttribute("disabled");
     btn?.removeAttribute("aria-busy");
+    return;
   }
+
+  // Show progress modal
+  const modal = document.getElementById("refreshProgressModal");
+  const bar = document.getElementById("refresh-progress-bar");
+  const text = document.getElementById("refresh-progress-text");
+  const detail = document.getElementById("refresh-progress-detail");
+  modal.classList.remove("d-none");
+
+  // Poll status until done
+  let done = false;
+  while (!done) {
+    await new Promise((r) => setTimeout(r, 1500));
+    let status;
+    try {
+      status = await api("/refresh/status");
+    } catch { continue; }
+
+    const pct = status.total > 0 ? Math.round((status.completed / status.total) * 100) : 0;
+    text.textContent = `${status.completed} / ${status.total} chaines`;
+    bar.style.width = `${pct}%`;
+    detail.textContent = status.current ? `En cours : ${status.current}` : "";
+
+    if (status.status === "done" || status.status === "error") {
+      done = true;
+    }
+  }
+
+  // Done
+  modal.classList.add("d-none");
+  bar.style.width = "0%";
+  detail.textContent = "";
+  text.textContent = `${status.completed} chaines traitees, ${status.errors || 0} erreurs`;
+
+  showToast(`Refresh termine : ${status.completed} chaines mises a jour`, status.errors > 0 ? "warning" : "success");
+  loadVideos(true);
+  loadStats();
+  icon?.classList.remove("spinning");
+  btn?.removeAttribute("disabled");
+  btn?.removeAttribute("aria-busy");
 }
 
 function renderChannelTopicBadges(channelId, topics, channelName) {

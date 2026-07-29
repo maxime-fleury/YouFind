@@ -193,16 +193,24 @@ export async function ingestChannel(channelId) {
   return { total: entries.length, added, durUpdated, source };
 }
 
-export async function refreshAllChannels() {
+export async function refreshAllChannels(onProgress) {
   const channels = stmts.getChannelsByStatus.all("validated");
   const results = [];
+  const total = channels.length;
 
   await runWithLimit(
     channels,
-    async (ch) => {
+    async (ch, idx) => {
       console.log(`[RSS] Refreshing ${ch.nom} (${ch.channel_id})...`);
-      const result = await ingestChannel(ch.channel_id);
-      results.push({ channel: ch.nom, ...result });
+      if (onProgress) onProgress({ current: idx, total, nom: ch.nom, status: "running" });
+      try {
+        const result = await ingestChannel(ch.channel_id);
+        results.push({ channel: ch.nom, ...result });
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", result });
+      } catch (e) {
+        console.error(`[RSS] Error refreshing ${ch.nom}:`, e.message);
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "error", error: e.message });
+      }
     },
     3,
     500
