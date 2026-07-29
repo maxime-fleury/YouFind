@@ -190,7 +190,7 @@ function renderVideoCard(v, seenSet) {
   const seenClass = seenSet.has(v.url) ? "seen" : "";
   return `
     <div class="col-sm-6 col-md-4 col-xl-3">
-      <div class="video-card h-100 ${seenClass}" data-video-url="${escapeHtml(v.url)}" onclick="playVideo('${escapeJs(v.url)}')" title="${seenClass ? 'Déjà vu' : ''}">
+      <div class="video-card h-100 ${seenClass}" data-video-url="${escapeHtml(v.url)}" onclick="playVideo('${escapeInlineJs(v.url)}')" title="${seenClass ? 'Déjà vu' : ''}">
         <div class="thumb-wrap">
             ${v.thumbnail ? `<img src="${v.thumbnail}" alt="" loading="lazy">` : ""}
             <div class="play-overlay" aria-hidden="true"><i class="bi bi-play-circle-fill"></i></div>
@@ -465,7 +465,7 @@ function renderChannels(searchQuery) {
               <button class="btn btn-success-glass btn-sm" onclick="validateChannel(${ch.id})" title="Valider">
                 <i class="bi bi-check-lg"></i> Valider
               </button>
-              <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeJs(ch.nom)}')" title="Rejeter">
+              <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeInlineJs(ch.nom)}')" title="Rejeter">
                 <i class="bi bi-x-lg"></i> Rejeter
               </button>
             </div>
@@ -478,7 +478,7 @@ function renderChannels(searchQuery) {
             <div class="ch-actions-divider"></div>`
               : ch.status === "validated"
                 ? `<div class="ch-actions-row">
-              <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeJs(ch.nom)}')" title="Rejeter">
+              <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeInlineJs(ch.nom)}')" title="Rejeter">
                 <i class="bi bi-x-lg"></i> Rejeter
               </button>
             </div>
@@ -544,7 +544,7 @@ async function loadTopics() {
             ${t.description ? `<div class="topic-desc mt-1">${escapeHtml(t.description)}</div>` : ""}
           </div>
           <div class="d-flex gap-2">
-            <button class="btn btn-primary-glass btn-sm flex-grow-1" onclick="discoverTopic('${escapeJs(t.nom)}')" title="Decouvrir">
+            <button class="btn btn-primary-glass btn-sm flex-grow-1" onclick="discoverTopic('${escapeInlineJs(t.nom)}')" title="Decouvrir">
               <i class="bi bi-compass"></i> Decouvrir
             </button>
             <button class="btn btn-sm-glass" onclick="deleteTopic(${t.id})" title="Supprimer">
@@ -629,10 +629,10 @@ async function runDiscovery() {
             </div>
           </div>
           <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
-            <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${escapeJs(ch.channelId)}')" title="Valider" style="padding:4px 8px;font-size:0.7rem">
+            <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${escapeInlineJs(ch.channelId)}')" title="Valider" style="padding:4px 8px;font-size:0.7rem">
               <i class="bi bi-check-lg"></i>
             </button>
-            <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${escapeJs(ch.channelId)}', '${escapeJs(ch.nom)}')" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
+            <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
@@ -858,7 +858,7 @@ async function previewChannel() {
         for (const alt of data.alternatives) {
           html += `
             <div class="glass-card p-2 mt-1 d-flex align-items-center gap-2" style="cursor:pointer" 
-                 onclick="document.getElementById('add-ch-input').value='${escapeJs(alt.nom)}';previewChannel()">
+                 onclick="document.getElementById('add-ch-input').value='${escapeInlineJs(alt.nom)}';previewChannel()">
               <div class="fw-bold" style="font-size:0.85rem">${escapeHtml(alt.nom)}</div>
               <div class="text-muted" style="font-size:0.75rem">${escapeHtml(alt.channelId)}</div>
             </div>`;
@@ -953,7 +953,7 @@ function renderChannelTopicBadges(channelId, topics, channelName) {
          onclick="event.stopPropagation();removeTopicFromChannel(${channelId}, ${t.id})"></i>
     </span>`
   ).join(' ');
-  const addBtn = `<span class="topic-badge topic-add" onclick="event.stopPropagation();openChannelTopics(${channelId}, '${escapeJs(channelName || "")}')" title="Ajouter un topic"><i class="bi bi-plus"></i></span>`;
+  const addBtn = `<span class="topic-badge topic-add" onclick="event.stopPropagation();openChannelTopics(${channelId}, '${escapeInlineJs(channelName || "")}')" title="Ajouter un topic"><i class="bi bi-plus"></i></span>`;
   container.innerHTML = badges + ' ' + addBtn;
 }
 
@@ -1279,6 +1279,15 @@ function escapeJs(str) {
   return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/`/g, "\\`");
 }
 
+// For embedding user data in onclick="..." attributes (double context: HTML + JS):
+// 1. JS-escape first (handles ', \, newlines within JS string literals)
+// 2. Then HTML-escape (handles " that would break the HTML attribute, &, <, >)
+function escapeInlineJs(str) {
+  if (!str) return "";
+  const jsSafe = str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/`/g, "\\`");
+  return jsSafe.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 async function loadQuota() {
   try {
     const quota = await api("/quota");
@@ -1467,10 +1476,10 @@ async function runRelatedDiscovery() {
           </div>
         </div>
         <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();quickValidate('${escapeJs(ch.channelId)}', this)" title="Valider" style="padding:4px 8px;font-size:0.7rem">
+          <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();quickValidate('${escapeInlineJs(ch.channelId)}', this)" title="Valider" style="padding:4px 8px;font-size:0.7rem">
             <i class="bi bi-check-lg"></i>
           </button>
-          <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();quickReject('${escapeJs(ch.channelId)}', '${escapeJs(ch.nom)}', this)" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
+          <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();quickReject('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}', this)" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
             <i class="bi bi-x-lg"></i>
           </button>
         </div>
@@ -1586,7 +1595,7 @@ async function loadRelatedChannels(channelId) {
           <a href="https://youtube.com/channel/${ch.channelId}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit;font-size:0.88rem">${escapeHtml(ch.nom)}</a>
         </div>
         <div class="dr-actions">
-          <button class="btn btn-sm-glass" onclick="event.stopPropagation();addRelatedChannel('${escapeJs(ch.channelId)}', '${escapeJs(ch.nom)}')" title="Ajouter" style="padding:3px 8px;font-size:0.7rem">
+          <button class="btn btn-sm-glass" onclick="event.stopPropagation();addRelatedChannel('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Ajouter" style="padding:3px 8px;font-size:0.7rem">
             <i class="bi bi-plus-lg"></i>
           </button>
         </div>
@@ -1620,7 +1629,7 @@ function renderChannelPreview(channelId, videos) {
     return;
   }
   container.innerHTML = `<div class="preview-thumbs">${videos.map((v) => `
-    <div class="preview-thumb" onclick="playVideo('${escapeJs(v.url)}')" title="${escapeHtml(v.titre)}">
+    <div class="preview-thumb" onclick="playVideo('${escapeInlineJs(v.url)}')" title="${escapeHtml(v.titre)}">
       ${v.thumbnail ? `<img src="${v.thumbnail}" alt="">` : ""}
       <span class="preview-views">${formatNumber(v.vues)}</span>
     </div>

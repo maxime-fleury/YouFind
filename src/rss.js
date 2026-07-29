@@ -213,6 +213,16 @@ export async function refreshAllChannels() {
 }
 
 export async function getChannelVideoSummaries(channelId, count = 5) {
+  // Try scraping first (more reliable than RSS)
+  let scraped = await scrapeChannelVideos(channelId, count);
+  if (scraped.length > 0) {
+    return scraped.slice(0, count).map((e) => ({
+      titre: e.titre,
+      description: e.description?.substring(0, 500) || "",
+      vues: e.vues,
+    }));
+  }
+  // Fallback to RSS
   const entries = await fetchChannelFeed(channelId);
   return entries.slice(0, count).map((e) => ({
     titre: e.titre,

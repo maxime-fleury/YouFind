@@ -69,6 +69,7 @@ db.run(`CREATE INDEX IF NOT EXISTS idx_channels_status ON channels(status);`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_channels_score ON channels(llm_score DESC);`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_feedback_channel ON feedback_log(channel_id);`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_feedback_decision_date ON feedback_log(decision, date_decision DESC);`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_videos_duration ON videos(duration);`);
 
 db.run(`
   CREATE TABLE IF NOT EXISTS settings (
@@ -334,7 +335,8 @@ const stmts = {
       fl.channel_nom as nom,
       'rejected' as status,
       fl.raison as raison_rejet,
-      fl.date_decision as date_ajout
+      fl.date_decision as date_ajout,
+      COALESCE((SELECT c.id FROM channels c WHERE c.channel_id = fl.channel_id), -1) as id
     FROM feedback_log fl
     WHERE fl.decision = 'rejected'
     ORDER BY fl.date_decision DESC

@@ -72,6 +72,16 @@ const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60 * 1000;
 const rateMap = new Map();
 
+// Prune stale rate-limit entries every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - RATE_WINDOW_MS;
+  for (const [ip, entries] of rateMap) {
+    const recent = entries.filter((t) => t > cutoff);
+    if (recent.length === 0) rateMap.delete(ip);
+    else rateMap.set(ip, recent);
+  }
+}, 5 * 60 * 1000).unref();
+
 function checkRateLimit(req) {
   const forwarded = req.headers.get("x-forwarded-for");
   const ip = forwarded ? forwarded.split(",")[0].trim() : "unknown";
@@ -102,8 +112,8 @@ const server = Bun.serve({
         const channel = url.searchParams.get("channel");
         const topic = url.searchParams.get("topic");
         const search = url.searchParams.get("q")?.trim() || "";
-        // Strip quotes and build a prefix-match query: term1* AND term2*
-        const rawTerms = search.replace(/['"]/g, "").split(/\s+/).filter((t) => t.length > 0);
+        // Build a safe prefix-match FTS5 query: term1* AND term2*
+        const rawTerms = search.replace(/['"]/g, "").split(/\s+/).filter((t) => t.length > 0).map((t) => t.replace(/[^\w\-]/g, ""));
         const hasSearch = rawTerms.length > 0;
         const sort = url.searchParams.get("sort") || (hasSearch ? "relevance" : "newest");
 
@@ -248,13 +258,16 @@ const server = Bun.serve({
         const id = parseInt(req.params.id);
         const ch = db.query(`SELECT channel_id, nom FROM channels WHERE id = ?`).get(id);
         if (!ch) return json({ error: "Channel not found" }, 404);
-        stmts.insertFeedback.run({
-          $channel_id: ch.channel_id,
-          $channel_nom: ch.nom,
-          $decision: "validated",
-          $raison: "",
+        const validateTx = db.transaction(() => {
+          stmts.insertFeedback.run({
+            $channel_id: ch.channel_id,
+            $channel_nom: ch.nom,
+            $decision: "validated",
+            $raison: "",
+          });
+          stmts.updateChannelStatus.run({ $status: "validated", $id: id });
         });
-        stmts.updateChannelStatus.run({ $status: "validated", $id: id });
+        validateTx();
         return json({ ok: true });
       },
     },
@@ -267,15 +280,17 @@ const server = Bun.serve({
         const ch = db.query(`SELECT channel_id, nom FROM channels WHERE id = ?`).get(id);
         if (!ch) return json({ error: "Channel not found" }, 404);
 
-        stmts.insertFeedback.run({
-          $channel_id: ch.channel_id,
-          $channel_nom: ch.nom,
-          $decision: "rejected",
-          $raison: body.raison || "",
+        const rejectTx = db.transaction(() => {
+          stmts.insertFeedback.run({
+            $channel_id: ch.channel_id,
+            $channel_nom: ch.nom,
+            $decision: "rejected",
+            $raison: body.raison || "",
+          });
+          stmts.deleteChannelVideos.run(ch.channel_id);
+          stmts.updateChannelRejection.run({ $raison: body.raison || "", $id: id });
         });
-
-        stmts.deleteChannelVideos.run(ch.channel_id);
-        stmts.updateChannelRejection.run({ $raison: body.raison || "", $id: id });
+        rejectTx();
 
         return json({ ok: true });
       },

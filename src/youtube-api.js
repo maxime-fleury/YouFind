@@ -211,11 +211,22 @@ function extractFromHTML(html) {
 
   let subscriberCount = 0;
   if (subsText) {
-    const numMatch = subsText.replace(/,/g, ".").match(/([\d.]+)\s*(K|M|Mi|abonn)/i);
+    // Normalize: "1 500" → "1500", "1,5k" → "1.5k", "1,500" depends on locale
+    let normalized = subsText.replace(/\s/g, "");
+    // If comma is followed by exactly 3 digits, it's a thousands separator (English)
+    // Otherwise it's a decimal separator (French)
+    if (/,(\d{3})\b/.test(normalized)) {
+      normalized = normalized.replace(/,/g, "");
+    } else {
+      normalized = normalized.replace(/,/g, ".");
+    }
+    const numMatch = normalized.match(/([\d.]+)\s*(K|M|Mi|abonn)/i) || normalized.match(/([\d.]+)/);
     if (numMatch) {
       let n = parseFloat(numMatch[1]);
-      if (/K|Ki/i.test(numMatch[2])) n *= 1000;
-      else if (/M|Mi/i.test(numMatch[2])) n *= 1000000;
+      if (numMatch[2]) {
+        if (/K|Ki/i.test(numMatch[2])) n *= 1000;
+        else if (/M|Mi/i.test(numMatch[2])) n *= 1000000;
+      }
       subscriberCount = Math.round(n);
     }
   }
@@ -339,56 +350,121 @@ export function isShortByText(title = "", description = "") {
 }
 
 function parseGridVideo(item) {
+  // Old format: gridVideoRenderer / videoRenderer
   const r = item.gridVideoRenderer || item.richItemRenderer?.content?.videoRenderer;
-  if (!r) return null;
+  if (r && r.videoId) {
+    let title = "";
+    if (r.title?.simpleText) title = r.title.simpleText;
+    else if (r.title?.runs) title = r.title.runs.map((run) => run.text).join("");
 
-  const videoId = r.videoId;
-  if (!videoId) return null;
+    let thumbnails = r.thumbnail?.thumbnails || r.thumbnail;
+    let thumbnail = "";
+    if (Array.isArray(thumbnails) && thumbnails.length > 0) {
+      thumbnail = thumbnails[thumbnails.length - 1].url;
+    }
 
-  let title = "";
-  if (r.title?.simpleText) title = r.title.simpleText;
-  else if (r.title?.runs) title = r.title.runs.map((run) => run.text).join("");
+    let viewsText = "";
+    if (r.viewCountText?.simpleText) viewsText = r.viewCountText.simpleText;
+    else if (r.viewCountText?.runs) viewsText = r.viewCountText.runs.map((run) => run.text).join("");
 
-  let thumbnails = r.thumbnail?.thumbnails || r.thumbnail;
-  let thumbnail = "";
-  if (Array.isArray(thumbnails) && thumbnails.length > 0) {
-    thumbnail = thumbnails[thumbnails.length - 1].url;
+    let publishedTime = "";
+    if (r.publishedTimeText?.simpleText) publishedTime = r.publishedTimeText.simpleText;
+
+    return {
+      videoId: r.videoId,
+      titre: title,
+      url: `https://www.youtube.com/watch?v=${r.videoId}`,
+      date_pub: parseRelativeTime(publishedTime),
+      description: "",
+      thumbnail,
+      vues: parseViewCount(viewsText),
+      duration: 0,
+    };
   }
 
-  let viewsText = "";
-  if (r.viewCountText?.simpleText) viewsText = r.viewCountText.simpleText;
-  else if (r.viewCountText?.runs) viewsText = r.viewCountText.runs.map((run) => run.text).join("");
+  // New format: richItemRenderer → content → lockupViewModel
+  const lockup = item.richItemRenderer?.content?.lockupViewModel;
+  if (!lockup) return null;
 
-  // publishedTimeText is relative like "2 days ago" — we store as ISO-ish string or empty
-  let publishedTime = "";
-  if (r.publishedTimeText?.simpleText) publishedTime = r.publishedTimeText.simpleText;
+  // Extract videoId from the overlay badge target or thumbnail URL
+  const badgeTarget = lockup.contentImage?.thumbnailViewModel?.overlays?.[0]
+    ?.thumbnailBottomOverlayViewModel?.badges?.[0]
+    ?.thumbnailBadgeViewModel?.animationActivationTargetId;
+  const thumbUrl = lockup.contentImage?.thumbnailViewModel?.image?.sources?.[0]?.url || "";
+  const videoId = (badgeTarget?.length === 11 ? badgeTarget : null) || thumbUrl.match(/\/vi\/([\w-]+)\//)?.[1];
+  if (!videoId) return null;
+
+  // Title
+  const title = lockup.metadata?.lockupMetadataViewModel?.title?.content || "";
+
+  // Thumbnail (largest)
+  const sources = lockup.contentImage?.thumbnailViewModel?.image?.sources || [];
+  const thumbnail = sources.length > 0 ? sources[sources.length - 1].url : "";
+
+  // Views and publish time from metadata rows
+  const parts = lockup.metadata?.lockupMetadataViewModel?.metadata
+    ?.contentMetadataViewModel?.metadataRows?.[0]?.metadataParts || [];
+  const viewsText = parts[0]?.text?.content || "";
+  const publishedTime = parts[1]?.text?.content || "";
 
   return {
     videoId,
     titre: title,
     url: `https://www.youtube.com/watch?v=${videoId}`,
     date_pub: parseRelativeTime(publishedTime),
-    description: "", // not available in grid renderer
+    description: "",
     thumbnail,
     vues: parseViewCount(viewsText),
     duration: 0,
   };
 }
 
+function isVideosTab(tab) {
+  const id = tab?.tabRenderer?.tabIdentifier;
+  if (id === "VIDEOS" || id === "Videos") return true;
+  const title = tab?.tabRenderer?.title?.toLowerCase();
+  return title === "videos" || title === "vidéos" || title === "video" || title === "vidéo";
+}
+
+function getTabContentItems(videoTab) {
+  const content = videoTab?.tabRenderer?.content;
+  // New layout: richGridRenderer directly on content
+  if (content?.richGridRenderer?.contents) return content.richGridRenderer.contents;
+  // Old layout: sectionListRenderer wrapping item/grid renderers
+  const sections = content?.sectionListRenderer?.contents || [];
+  const items = [];
+  for (const section of sections) {
+    const sectionItems = section.itemSectionRenderer?.contents?.[0]?.gridRenderer?.items ||
+                         section.itemSectionRenderer?.contents?.[0]?.richGridRenderer?.contents ||
+                         [];
+    items.push(...sectionItems);
+  }
+  return items;
+}
+
+function getTabContinuations(videoTab) {
+  const content = videoTab?.tabRenderer?.content;
+  // New layout: richGridRenderer continuations
+  if (content?.richGridRenderer?.continuations) return content.richGridRenderer.continuations;
+  // Old layout: sectionListRenderer continuations
+  const sections = content?.sectionListRenderer?.contents || [];
+  for (const section of sections) {
+    const cont = section.itemSectionRenderer?.contents?.[0]?.gridRenderer?.continuations;
+    if (cont) return cont;
+  }
+  if (content?.sectionListRenderer?.continuations) return content.sectionListRenderer.continuations;
+  return [];
+}
+
 function extractGridVideos(data) {
   const videos = [];
   try {
     const tabs = data.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
-    const videoTab = tabs.find((t) => t.tabRenderer?.tabIdentifier === "VIDEOS" || t.tabRenderer?.title?.toLowerCase() === "videos");
-    const contents = videoTab?.tabRenderer?.content?.sectionListRenderer?.contents || [];
-    for (const section of contents) {
-      const items = section.itemSectionRenderer?.contents?.[0]?.gridRenderer?.items ||
-                    section.itemSectionRenderer?.contents?.[0]?.richGridRenderer?.contents ||
-                    [];
-      for (const item of items) {
-        const v = parseGridVideo(item);
-        if (v) videos.push(v);
-      }
+    const videoTab = tabs.find(isVideosTab);
+    const items = getTabContentItems(videoTab);
+    for (const item of items) {
+      const v = parseGridVideo(item);
+      if (v) videos.push(v);
     }
   } catch (err) {
     console.error("[Scrape] Error extracting grid videos:", err.message);
@@ -399,9 +475,8 @@ function extractGridVideos(data) {
 function extractContinuation(data) {
   try {
     const tabs = data.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
-    const videoTab = tabs.find((t) => t.tabRenderer?.tabIdentifier === "VIDEOS" || t.tabRenderer?.title?.toLowerCase() === "videos");
-    const continuations = videoTab?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents?.[0]?.gridRenderer?.continuations ||
-                          videoTab?.tabRenderer?.content?.sectionListRenderer?.continuations || [];
+    const videoTab = tabs.find(isVideosTab);
+    const continuations = getTabContinuations(videoTab);
     for (const c of continuations) {
       if (c.nextContinuationData?.continuation) return c.nextContinuationData.continuation;
       if (c.button?.buttonRenderer?.command?.continuationCommand?.token) return c.button.buttonRenderer.command.continuationCommand.token;

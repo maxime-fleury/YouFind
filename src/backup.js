@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync, rmSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { db } from "./db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -8,7 +9,7 @@ const root = join(__dirname, "..");
 const MAX_BACKUPS = 14;
 
 /**
- * Run a single database backup: copy youfind.db → backups/youfind-YYYY-MM-DDTHH-MM.db
+ * Run a single database backup: checkpoint WAL, copy youfind.db → backups/youfind-YYYY-MM-DDTHH-MM.db
  * then prune old backups beyond MAX_BACKUPS.
  */
 export function runBackup() {
@@ -18,6 +19,9 @@ export function runBackup() {
   if (!existsSync(backupDir)) {
     mkdirSync(backupDir, { recursive: true });
   }
+
+  // Checkpoint WAL to ensure backup is consistent
+  db.run("PRAGMA wal_checkpoint(TRUNCATE);");
 
   const date = new Date();
   const ts =
