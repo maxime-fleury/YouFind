@@ -417,18 +417,22 @@
     </div>
   </div>
 
-  <!-- Refresh progress modal -->
-  <div id="refreshProgressModal" class="modal-overlay d-none">
-    <div class="glass-card" style="max-width:480px;margin:20vh auto;padding:2rem;text-align:center">
-      <div class="spinner-glass mb-3" style="width:40px;height:40px;border-width:4px;margin:0 auto"></div>
-      <h5 class="mb-2">Rafraîchissement RSS</h5>
-      <p class="text-muted small mb-3" id="refresh-progress-text">Initialisation...</p>
-      <div class="progress" style="height:8px;border-radius:99px;background:var(--bg-tertiary)">
-        <div class="progress-bar" id="refresh-progress-bar"
-             style="width:0%;border-radius:99px;background:linear-gradient(90deg,var(--accent-purple),var(--accent-pink));transition:width 0.3s ease">
+  <!-- Refresh progress banner -->
+  <div id="refreshBanner" class="d-none" style="position:sticky;top:0;z-index:1020;background:rgba(18,8,37,0.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--glass-border);padding:10px 16px">
+    <div class="d-flex align-items-center gap-3">
+      <div class="spinner-border spinner-border-sm text-purple-light flex-shrink-0" role="status"></div>
+      <div class="flex-grow-1 min-w-0">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <span class="small text-purple-light fw-medium" id="refreshBannerText">Rafraîchissement...</span>
+          <span class="small text-muted" id="refreshBannerCount">0 / 0</span>
+        </div>
+        <div class="progress" style="height:4px;border-radius:99px;background:var(--bg-tertiary)">
+          <div class="progress-bar progress-bar-striped progress-bar-animated" id="refreshBannerBar"
+               style="width:0%;border-radius:99px;background:linear-gradient(90deg,var(--accent-purple),var(--accent-pink))">
+          </div>
         </div>
       </div>
-      <small class="text-muted mt-2 d-block" id="refresh-progress-detail"></small>
+      <small class="text-muted flex-shrink-0" id="refreshBannerDetail" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></small>
     </div>
   </div>
 

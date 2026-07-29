@@ -1079,13 +1079,6 @@ mark {
 }
 .player-close:hover { background: rgba(139, 92, 246, 0.4); transform: rotate(90deg); }
 
-.modal-overlay {
-  position: fixed; inset: 0; z-index: 9999;
-  background: rgba(5, 2, 15, 0.85);
-  backdrop-filter: blur(4px);
-  display: flex; align-items: flex-start; justify-content: center;
-}
-
 @media (max-width: 640px) {
   .player-backdrop { padding: 8px; }
   .player-wrap { width: 100vw; }

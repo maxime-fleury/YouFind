@@ -938,12 +938,12 @@ async function refreshRSS() {
     return;
   }
 
-  // Show progress modal
-  const modal = document.getElementById("refreshProgressModal");
-  const bar = document.getElementById("refresh-progress-bar");
-  const text = document.getElementById("refresh-progress-text");
-  const detail = document.getElementById("refresh-progress-detail");
-  modal.classList.remove("d-none");
+  // Show progress banner
+  const banner = document.getElementById("refreshBanner");
+  const bar = document.getElementById("refreshBannerBar");
+  const count = document.getElementById("refreshBannerCount");
+  const detail = document.getElementById("refreshBannerDetail");
+  banner.classList.remove("d-none");
 
   // Poll status until done
   let done = false;
@@ -955,9 +955,12 @@ async function refreshRSS() {
     } catch { continue; }
 
     const pct = status.total > 0 ? Math.round((status.completed / status.total) * 100) : 0;
-    text.textContent = `${status.completed} / ${status.total} chaines`;
+    count.textContent = `${status.completed} / ${status.total}`;
     bar.style.width = `${pct}%`;
-    detail.textContent = status.current ? `En cours : ${status.current}` : "";
+    document.getElementById("refreshBannerText").textContent = status.current
+      ? `${status.completed} / ${status.total} chaines`
+      : "Rafraîchissement...";
+    detail.textContent = status.current || "";
 
     if (status.status === "done" || status.status === "error") {
       done = true;
@@ -965,12 +968,16 @@ async function refreshRSS() {
   }
 
   // Done
-  modal.classList.add("d-none");
-  bar.style.width = "0%";
-  detail.textContent = "";
-  text.textContent = `${status.completed} chaines traitees, ${status.errors || 0} erreurs`;
+  bar.classList.remove("progress-bar-striped", "progress-bar-animated");
+  bar.style.width = "100%";
+  count.textContent = `✓ ${status.completed} chaines`;
+  detail.textContent = status.errors > 0 ? `${status.errors} erreurs` : "";
+  setTimeout(() => {
+    banner.classList.add("d-none");
+    bar.classList.add("progress-bar-striped", "progress-bar-animated");
+    bar.style.width = "0%";
+  }, 3000);
 
-  showToast(`Refresh termine : ${status.completed} chaines mises a jour`, status.errors > 0 ? "warning" : "success");
   loadVideos(true);
   loadStats();
   icon?.classList.remove("spinning");
