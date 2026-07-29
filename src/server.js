@@ -101,52 +101,60 @@ const server = Bun.serve({
         const offset = parseInt(url.searchParams.get("offset") || "0");
         const channel = url.searchParams.get("channel");
         const topic = url.searchParams.get("topic");
-        const sort = url.searchParams.get("sort") || "newest";
-        let videos;
+        const search = url.searchParams.get("q")?.trim() || "";
+        // Strip quotes and build a prefix-match query: term1* AND term2*
+        const rawTerms = search.replace(/['"]/g, "").split(/\s+/).filter((t) => t.length > 0);
+        const hasSearch = rawTerms.length > 0;
+        const sort = url.searchParams.get("sort") || (hasSearch ? "relevance" : "newest");
 
         const sortClauses = {
           newest: "v.date_pub DESC",
           views: "v.vues DESC",
           engagement: "CASE WHEN c.subscriber_count > 0 THEN CAST(v.vues AS REAL) / c.subscriber_count ELSE 0 END DESC",
           score: "c.llm_score DESC NULLS LAST",
+          relevance: hasSearch ? "bm25(fts) ASC" : "v.date_pub DESC",
         };
         if (!sortClauses[sort]) {
           return json({ error: "Invalid sort" }, 400);
         }
-        const orderBy = sortClauses[sort];
+
+        // Build query dynamically
+        const joins = [];
+        const conditions = ["c.status = 'validated'", "(v.duration > 60 OR v.duration = 0)"];
+        const params = [];
+
+        if (hasSearch) {
+          joins.push("JOIN videos_fts fts ON v.id = fts.rowid");
+          const ftsQuery = rawTerms.map((t) => `"${t}"*`).join(" AND ");
+          conditions.push("fts MATCH ?");
+          params.push(ftsQuery);
+        }
 
         if (topic === "0") {
-          videos = db.query(`
-            SELECT DISTINCT v.*, c.nom as channel_nom
-            FROM videos v JOIN channels c ON v.channel_id = c.channel_id
-            WHERE NOT EXISTS (SELECT 1 FROM channel_topics ct WHERE ct.channel_id = v.channel_id)
-            AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
-            ORDER BY ${orderBy} LIMIT ? OFFSET ?
-          `).all(limit, offset);
+          conditions.push("NOT EXISTS (SELECT 1 FROM channel_topics ct WHERE ct.channel_id = v.channel_id)");
         } else if (topic) {
-          videos = db.query(`
-            SELECT DISTINCT v.*, c.nom as channel_nom
-            FROM videos v
-            JOIN channels c ON v.channel_id = c.channel_id
-            JOIN channel_topics ct ON v.channel_id = ct.channel_id
-            WHERE ct.topic_id = ? AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
-            ORDER BY ${orderBy} LIMIT ? OFFSET ?
-          `).all(parseInt(topic), limit, offset);
+          joins.push("JOIN channel_topics ct ON v.channel_id = ct.channel_id");
+          conditions.push("ct.topic_id = ?");
+          params.push(parseInt(topic));
         } else if (channel) {
-          videos = db.query(`
-            SELECT v.*, c.nom as channel_nom FROM videos v
-            JOIN channels c ON v.channel_id = c.channel_id
-            WHERE v.channel_id = ? AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
-            ORDER BY ${orderBy} LIMIT ? OFFSET ?
-          `).all(channel, limit, offset);
-        } else {
-          videos = db.query(`
-            SELECT v.*, c.nom as channel_nom FROM videos v
-            JOIN channels c ON v.channel_id = c.channel_id
-            WHERE c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
-            ORDER BY ${orderBy} LIMIT ? OFFSET ?
-          `).all(limit, offset);
+          conditions.push("v.channel_id = ?");
+          params.push(channel);
         }
+
+        params.push(limit, offset);
+
+        const rankSelect = search ? ", bm25(fts) as rank" : "";
+        const sql = `
+          SELECT DISTINCT v.*, c.nom as channel_nom${rankSelect}
+          FROM videos v
+          JOIN channels c ON v.channel_id = c.channel_id
+          ${joins.join("\n")}
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY ${sortClauses[sort]}
+          LIMIT ? OFFSET ?
+        `;
+
+        const videos = db.query(sql).all(...params);
         return json(videos);
       },
     },

@@ -90,6 +90,66 @@ db.run(`
 db.run(`CREATE INDEX IF NOT EXISTS idx_ct_topic ON channel_topics(topic_id);`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_ct_channel ON channel_topics(channel_id);`);
 
+// --- FTS5 full-text search index for videos ---
+db.run(`
+  CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
+    titre,
+    description,
+    channel_nom,
+    tokenize='unicode61'
+  );
+`);
+
+db.run(`DROP TRIGGER IF EXISTS videos_fts_ai;`);
+db.run(`DROP TRIGGER IF EXISTS videos_fts_ad;`);
+db.run(`DROP TRIGGER IF EXISTS videos_fts_au;`);
+db.run(`DROP TRIGGER IF EXISTS channels_fts_au;`);
+
+db.run(`
+  CREATE TRIGGER videos_fts_ai AFTER INSERT ON videos
+  BEGIN
+    INSERT INTO videos_fts(rowid, titre, description, channel_nom)
+    VALUES (new.id, new.titre, new.description, (SELECT nom FROM channels WHERE channel_id = new.channel_id));
+  END;
+
+  CREATE TRIGGER videos_fts_ad AFTER DELETE ON videos
+  BEGIN
+    DELETE FROM videos_fts WHERE rowid = old.id;
+  END;
+
+  CREATE TRIGGER videos_fts_au AFTER UPDATE ON videos
+  BEGIN
+    UPDATE videos_fts
+    SET titre = new.titre,
+        description = new.description,
+        channel_nom = (SELECT nom FROM channels WHERE channel_id = new.channel_id)
+    WHERE rowid = old.id;
+  END;
+
+  CREATE TRIGGER channels_fts_au AFTER UPDATE OF nom ON channels
+  BEGIN
+    UPDATE videos_fts
+    SET channel_nom = new.nom
+    WHERE rowid IN (SELECT id FROM videos WHERE channel_id = new.channel_id);
+  END;
+`);
+
+// Backfill existing videos if the FTS index is empty
+try {
+  const ftsCount = db.query("SELECT count(*) as c FROM videos_fts").get().c;
+  if (ftsCount === 0) {
+    console.log("[DB] Backfilling FTS index...");
+    db.run(`
+      INSERT INTO videos_fts(rowid, titre, description, channel_nom)
+      SELECT v.id, v.titre, v.description, c.nom
+      FROM videos v JOIN channels c ON v.channel_id = c.channel_id;
+    `);
+    console.log("[DB] FTS index backfilled.");
+  }
+} catch (e) {
+  console.error("[DB] Failed to backfill FTS index:", e.message);
+}
+
 const DEFAULT_SETTINGS = {
   youtube_api_key: "",
   llm_provider: "ollama",

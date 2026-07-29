@@ -96,22 +96,46 @@
     </div>
 
     <div id="page-videos" class="page-content d-none">
-      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <h2 class="section-title"><i class="bi bi-camera-reels"></i> Videos recentes</h2>
-        <div class="d-flex gap-2 align-items-center">
-          <select id="video-sort" class="form-select form-select-glass" onchange="loadVideos(true)" style="width:auto">
-            <option value="newest">Plus recentes</option>
-            <option value="views">Plus vues</option>
-            <option value="engagement">Engagement</option>
-            <option value="score">Score LLM</option>
-          </select>
-          <select id="video-topic-filter" class="form-select form-select-glass" onchange="loadVideos(true)" style="width:auto">
-            <option value="">Tous les topics</option>
-          </select>
-          <button class="btn btn-glass" onclick="refreshRSS()">
-            <i class="bi bi-arrow-clockwise"></i> Refresh RSS
+      <div class="videos-header mb-4">
+        <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+          <h2 class="section-title mb-0"><i class="bi bi-camera-reels"></i> Vidéos récentes</h2>
+          <button class="btn btn-primary-glass" id="btn-refresh-rss" onclick="refreshRSS()">
+            <i class="bi bi-arrow-clockwise btn-icon"></i> Refresh RSS
           </button>
         </div>
+      </div>
+
+      <!-- Sticky filters bar -->
+      <div class="videos-filters glass-card p-3 mb-4">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <div class="filter-group search-group">
+            <i class="bi bi-search text-purple-light"></i>
+            <input type="text" id="video-search" class="form-control form-control-glass" placeholder="Rechercher une vidéo..." oninput="debounceVideoSearch()">
+          </div>
+          <div class="filter-group">
+            <i class="bi bi-funnel text-purple-light"></i>
+            <select id="video-topic-filter" class="form-select form-select-glass" onchange="loadVideos(true)">
+              <option value="">Tous les topics</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <i class="bi bi-sort-down text-purple-light"></i>
+            <select id="video-sort" class="form-select form-select-glass" onchange="loadVideos(true)">
+              <option value="newest">Plus récentes</option>
+              <option value="views">Plus vues</option>
+              <option value="engagement">Engagement</option>
+              <option value="score">Score LLM</option>
+              <option value="relevance">Pertinence</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="videos-loading" class="row g-3 d-none"></div>
+      <div id="videos-empty" class="empty-state d-none">
+        <i class="bi bi-camera-video-off"></i>
+        <h5>Aucune vidéo trouvée</h5>
+        <p>Essayez de changer de filtre ou de rafraîchir les flux RSS.</p>
       </div>
       <div id="videos-grid" class="row g-3"></div>
     </div>
@@ -462,31 +486,6 @@
       <div class="player-box" id="playerBox">
         <div class="player-glow"></div>
         <div class="player-vid" id="playerVid"></div>
-        <div class="player-controls" id="playerControls">
-          <div class="pc-progress" id="pcProgress">
-            <div class="pc-fill" id="pcFill"></div>
-            <div class="pc-thumb" id="pcThumb"></div>
-          </div>
-          <div class="pc-row">
-            <button class="pc-btn pc-play" id="pcPlay">
-              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-            </button>
-            <span class="pc-time" id="pcTime">0:00 / 0:00</span>
-            <div class="pc-spacer"></div>
-            <div class="pc-speed-wrap">
-              <button class="pc-btn pc-speed" id="pcSpeed">2x</button>
-            </div>
-            <div class="pc-vol-wrap">
-              <button class="pc-btn" id="pcMute">
-                <svg viewBox="0 0 24 24"><path d="M3 10v4h4l5 5V5L7 10H3zm13.5 2A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-              </button>
-              <div class="pc-vol-track"><div class="pc-vol-fill" id="pcVolFill"></div></div>
-            </div>
-            <button class="pc-btn" id="pcFs">
-              <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   </div>
