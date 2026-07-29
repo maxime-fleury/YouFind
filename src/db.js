@@ -150,6 +150,29 @@ try {
   console.error("[DB] Failed to backfill FTS index:", e.message);
 }
 
+// Backfill rejected channels from feedback_log (for historical data before we kept channels in DB)
+try {
+  const rejectedCount = db.query(`SELECT count(*) as c FROM channels WHERE status = 'rejected'`).get().c;
+  if (rejectedCount === 0) {
+    console.log("[DB] Backfilling rejected channels from feedback_log...");
+    db.run(`
+      INSERT OR IGNORE INTO channels (nom, channel_id, status, raison_rejet, date_ajout)
+      SELECT DISTINCT
+        COALESCE(channel_nom, 'Inconnu') as nom,
+        channel_id,
+        'rejected' as status,
+        raison as raison_rejet,
+        date_decision as date_ajout
+      FROM feedback_log
+      WHERE decision = 'rejected'
+    `);
+    const added = db.query(`SELECT changes() as c`).get().c;
+    console.log(`[DB] ${added} rejected channels backfilled.`);
+  }
+} catch (e) {
+  console.error("[DB] Failed to backfill rejected channels:", e.message);
+}
+
 const DEFAULT_SETTINGS = {
   youtube_api_key: "",
   llm_provider: "ollama",
@@ -244,8 +267,8 @@ const stmts = {
     VALUES ($channel_id, $titre, $description, $url, $thumbnail, $date_pub, $vues, $duration)
   `),
 
-  getVideos: db.prepare(`SELECT v.*, c.nom as channel_nom FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND (v.duration > 60 OR v.duration = 0) ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
-  getVideosByChannel: db.prepare(`SELECT v.* FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE v.channel_id = ? AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0) ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
+  getVideos: db.prepare(`SELECT v.*, c.nom as channel_nom FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND v.duration > 60 ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
+  getVideosByChannel: db.prepare(`SELECT v.* FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE v.channel_id = ? AND c.status = 'validated' AND v.duration > 60 ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
   getVideoByUrl: db.prepare(`SELECT id, duration FROM videos WHERE url = ?`),
   updateVideoDuration: db.prepare(`UPDATE videos SET duration = $duration WHERE url = $url`),
 
@@ -276,7 +299,7 @@ const stmts = {
       SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) as validated_channels,
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_channels,
       (SELECT COUNT(*) FROM feedback_log WHERE decision = 'rejected') as rejected_channels,
-      (SELECT COUNT(*) FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)) as total_videos,
+      (SELECT COUNT(*) FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND v.duration > 60) as total_videos,
       (SELECT COUNT(*) FROM topics) as total_topics
     FROM channels
   `),
@@ -291,7 +314,7 @@ const stmts = {
     FROM videos v
     JOIN channels c ON v.channel_id = c.channel_id
     JOIN channel_topics ct ON v.channel_id = ct.channel_id
-    WHERE ct.topic_id = ? AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
+    WHERE ct.topic_id = ? AND c.status = 'validated' AND v.duration > 60
     ORDER BY v.date_pub DESC
     LIMIT ? OFFSET ?
   `),
@@ -300,9 +323,21 @@ const stmts = {
     FROM videos v
     JOIN channels c ON v.channel_id = c.channel_id
     WHERE NOT EXISTS (SELECT 1 FROM channel_topics ct WHERE ct.channel_id = v.channel_id)
-      AND c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
+      AND c.status = 'validated' AND v.duration > 60
     ORDER BY v.date_pub DESC
     LIMIT ? OFFSET ?
+  `),
+
+  getRejectedFromFeedback: db.prepare(`
+    SELECT DISTINCT
+      fl.channel_id as channel_id,
+      fl.channel_nom as nom,
+      'rejected' as status,
+      fl.raison as raison_rejet,
+      fl.date_decision as date_ajout
+    FROM feedback_log fl
+    WHERE fl.decision = 'rejected'
+    ORDER BY fl.date_decision DESC
   `),
 
   getBlacklistedChannelIds: db.prepare(`

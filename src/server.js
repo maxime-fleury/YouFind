@@ -120,7 +120,7 @@ const server = Bun.serve({
 
         // Build query dynamically
         const joins = [];
-        const conditions = ["c.status = 'validated'", "(v.duration > 60 OR v.duration = 0)"];
+        const conditions = ["c.status = 'validated'", "v.duration > 60"];
         const params = [];
 
         if (hasSearch) {
@@ -176,7 +176,12 @@ const server = Bun.serve({
         const status = url.searchParams.get("status");
         const include = url.searchParams.get("include");
         let channels;
-        if (status) {
+        if (status === "rejected") {
+          channels = stmts.getChannelsByStatus.all(status);
+          if (channels.length === 0) {
+            channels = stmts.getRejectedFromFeedback.all();
+          }
+        } else if (status) {
           channels = stmts.getChannelsByStatus.all(status);
         } else {
           channels = stmts.getAllChannels.all();
@@ -270,7 +275,7 @@ const server = Bun.serve({
         });
 
         stmts.deleteChannelVideos.run(ch.channel_id);
-        stmts.deleteChannel.run(id);
+        stmts.updateChannelRejection.run({ $raison: body.raison || "", $id: id });
 
         return json({ ok: true });
       },
@@ -366,25 +371,10 @@ const server = Bun.serve({
     "/api/discover": {
       POST: async (req) => {
         const body = await readBody(req);
-        let topics = stmts.getAllTopics.all();
-        let topic = topics.find((t) => t.nom.toLowerCase() === body.topic?.toLowerCase()) || topics[0];
+        const topicQuery = body.topic?.trim();
+        if (!topicQuery) return json({ error: "topic required" }, 400);
 
-        if (!topic && body.topic) {
-          const info = stmts.insertTopic.run({ $nom: body.topic, $description: "" });
-          topic = { id: info.lastInsertRowid, nom: body.topic };
-          topics = stmts.getAllTopics.all();
-        }
-
-        if (!topic) return json({ error: "No topic found" }, 400);
-
-        const count = parseInt(body.count) || 20;
-        const offset = parseInt(body.offset) || 0;
-        const results = await discoverFromTopic(topic.nom, count, offset);
-
-        // Auto-assign discovered channels to this topic
-        for (const ch of results.channels) {
-          stmts.assignTopic.run(ch.channelId, topic.id);
-        }
+        const results = await discoverFromTopic(topicQuery);
 
         // Auto-ingest videos for newly discovered channels (free RSS)
         if (results.channels.length > 0) {
@@ -393,7 +383,7 @@ const server = Bun.serve({
           )).catch(() => {});
         }
 
-        return json({ ok: true, topic: topic.nom, found: results.channels.length, channels: results.channels, method: results.method });
+        return json({ ok: true, topic: topicQuery, found: results.channels.length, channels: results.channels, method: results.method });
       },
     },
 
@@ -540,7 +530,7 @@ const server = Bun.serve({
           SELECT v.*, c.nom as channel_nom, c.llm_score
           FROM videos v
           JOIN channels c ON v.channel_id = c.channel_id
-          WHERE c.status = 'validated' AND (v.duration > 60 OR v.duration = 0)
+          WHERE c.status = 'validated' AND v.duration > 60
           ORDER BY v.date_pub DESC LIMIT 12
         `).all();
         const pendingChannels = db.query(`

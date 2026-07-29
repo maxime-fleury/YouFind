@@ -43,12 +43,10 @@ function navigateTo(page) {
     btn.classList.toggle("active", btn.dataset.page === page);
   });
 
-  if (page === "home") loadDashboard();
   if (page === "videos") loadVideos(true);
   if (page === "channels") loadChannels();
+  if (page === "discover") { loadTopics(); populateTopicFilter(); }
   if (page === "related") loadRelatedPage();
-  if (page === "topics") loadTopics();
-  if (page === "feedback") loadFeedback();
   if (page === "settings") loadSettings();
 }
 
@@ -478,7 +476,14 @@ function renderChannels(searchQuery) {
               <span class="quick-reject-pill" onclick="quickRejectChannel(${ch.id}, 'Pas active')">Inactive</span>
             </div>
             <div class="ch-actions-divider"></div>`
-              : ""
+              : ch.status === "validated"
+                ? `<div class="ch-actions-row">
+              <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeJs(ch.nom)}')" title="Rejeter">
+                <i class="bi bi-x-lg"></i> Rejeter
+              </button>
+            </div>
+            <div class="ch-actions-divider"></div>`
+                : ""
           }
           <div class="ch-actions-row">
             <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${ch.channel_id}','_blank')" title="Voir sur YouTube">
@@ -513,51 +518,64 @@ function renderChannels(searchQuery) {
 }
 
 async function loadTopics() {
-  const list = document.getElementById("topics-list");
+  const grid = document.getElementById("topics-grid");
   try {
     const topics = await api("/topics");
 
     if (topics.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <i class="bi bi-tags"></i>
-          <h5>Aucun topic</h5>
-          <p>Ajoute un topic pour lancer la decouverte.</p>
+      grid.innerHTML = `
+        <div class="col-12">
+          <div class="empty-state">
+            <i class="bi bi-tags"></i>
+            <h5>Aucun topic</h5>
+            <p>Ajoute un topic pour lancer la decouverte.</p>
+          </div>
         </div>`;
       return;
     }
 
-    list.innerHTML = topics
+    grid.innerHTML = topics
       .map(
         (t) => `
-      <div class="topic-card mb-2">
-        <div>
-          <div class="topic-name">${escapeHtml(t.nom)}</div>
-          ${t.description ? `<div class="topic-desc">${escapeHtml(t.description)}</div>` : ""}
+      <div class="col-sm-6 col-md-4 col-lg-3">
+        <div class="glass-card p-3 h-100 d-flex flex-column">
+          <div class="flex-grow-1 mb-2">
+            <div class="topic-name">${escapeHtml(t.nom)}</div>
+            ${t.description ? `<div class="topic-desc mt-1">${escapeHtml(t.description)}</div>` : ""}
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary-glass btn-sm flex-grow-1" onclick="discoverTopic('${escapeJs(t.nom)}')" title="Decouvrir">
+              <i class="bi bi-compass"></i> Decouvrir
+            </button>
+            <button class="btn btn-sm-glass" onclick="deleteTopic(${t.id})" title="Supprimer">
+              <i class="bi bi-trash3"></i>
+            </button>
+          </div>
         </div>
-        <button class="btn btn-sm-glass" onclick="deleteTopic(${t.id})">
-          <i class="bi bi-trash3"></i>
-        </button>
       </div>`
       )
       .join("");
   } catch (err) {
     console.error("[loadTopics]", err);
-    list.innerHTML = '<div class="empty-state"><p class="text-muted">Erreur de chargement des topics</p></div>';
+    grid.innerHTML = '<div class="col-12"><div class="empty-state"><p class="text-muted">Erreur de chargement des topics</p></div></div>';
   }
 }
 
+function discoverTopic(topicName) {
+  document.getElementById("discover-input").value = topicName;
+  navigateTo("discover");
+  runDiscovery();
+}
+
 async function addTopic() {
-  const nom = document.getElementById("topic-nom").value.trim();
-  const desc = document.getElementById("topic-desc").value.trim();
+  const nom = document.getElementById("discover-input").value.trim();
   if (!nom) return showToast("Entrez un nom de topic", "error");
 
   await api("/topics", {
     method: "POST",
-    body: JSON.stringify({ nom, description: desc }),
+    body: JSON.stringify({ nom, description: "" }),
   });
-  document.getElementById("topic-nom").value = "";
-  document.getElementById("topic-desc").value = "";
+  document.getElementById("discover-input").value = "";
   showToast("Topic ajoute", "success");
   loadTopics();
   populateTopicFilter();
@@ -576,18 +594,16 @@ async function runDiscovery() {
   const results = document.getElementById("discover-results");
   const badge = document.getElementById("discover-method-badge");
   const topicQuery = input.value.trim();
+  if (!topicQuery) return showToast("Entrez un topic", "error");
 
   try {
     badge.innerHTML = '<span class="status-badge pending"><i class="bi bi-search"></i> Scraping YouTube...</span> <span class="api-cost free">0 credit</span>';
     status.innerHTML = '<span class="spinner-glass"></span> Recherche via scraping (gratuit, 0 credit API)...';
     results.innerHTML = "";
 
-    const count = parseInt(document.getElementById("discover-count")?.value || "20");
-    const offset = parseInt(document.getElementById("discover-offset")?.value || "0");
-
     const data = await api("/discover", {
       method: "POST",
-      body: JSON.stringify({ topic: topicQuery || undefined, count, offset }),
+      body: JSON.stringify({ topic: topicQuery }),
     });
 
     const methodUsed = data.method === "scraping" ? "Scraping" : "API";
@@ -1090,51 +1106,7 @@ async function populateTopicFilter() {
   }
 }
 
-async function loadFeedback() {
-  const list = document.getElementById("feedback-list");
-  list.innerHTML = '<div class="text-center py-4"><div class="spinner-glass"></div></div>';
 
-  try {
-    const feedback = await api("/feedback?limit=50");
-    if (feedback.length === 0) {
-      list.innerHTML = `
-        <div class="empty-state">
-          <i class="bi bi-journal-check"></i>
-          <h5>Aucun rejet</h5>
-          <p>Les chaines rejetees apparaitront ici avec leur raison.</p>
-        </div>`;
-      return;
-    }
-
-    list.innerHTML = feedback
-      .map(
-        (f) => `
-      <div class="channel-card mb-3">
-        <div class="ch-avatar" style="background:linear-gradient(135deg, #b91c1c, #ef4444)">
-          <i class="bi bi-x-circle"></i>
-        </div>
-        <div class="ch-info">
-          <div>
-            <span class="ch-name">${escapeHtml(f.channel_nom || f.current_channel_nom || "Inconnu")}</span>
-            <span class="status-badge rejected">rejetee</span>
-          </div>
-          <div class="ch-meta">
-            <span><i class="bi bi-calendar3"></i> ${formatDate(f.date_decision)}</span>
-            <span><i class="bi bi-youtube"></i> ${escapeHtml(f.channel_id)}</span>
-          </div>
-          ${f.raison ? `<div class="mt-2" style="font-size:0.82rem;color:var(--accent-red);font-style:italic">"${escapeHtml(f.raison)}"</div>` : '<div class="mt-2 text-muted" style="font-size:0.78rem">Aucune raison fournie</div>'}
-        </div>
-      </div>`
-      )
-      .join("");
-  } catch (err) {
-    list.innerHTML = `<div class="empty-state">
-      <i class="bi bi-exclamation-triangle"></i>
-      <h5>Erreur</h5>
-      <p>${escapeHtml(err.message)}</p>
-    </div>`;
-  }
-}
 
 function escapeHtml(str) {
   if (!str) return "";
@@ -1397,69 +1369,7 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// --- Dashboard ---
-async function loadDashboard() {
-  try {
-    const data = await api("/dashboard");
 
-    // Recent videos
-    const videosEl = document.getElementById("home-recent-videos");
-    if (data.recentVideos.length === 0) {
-      videosEl.innerHTML = '<div class="col-12 text-muted text-center py-4">Aucune video recente</div>';
-    } else {
-      const seenSet = getSeenVideos();
-      videosEl.innerHTML = data.recentVideos.map((v) => renderVideoCard(v, seenSet)).join("");
-    }
-
-    // Pending channels
-    const pendingEl = document.getElementById("home-pending");
-    if (data.pendingChannels.length === 0) {
-      pendingEl.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucune chaine en attente</div>';
-    } else {
-      pendingEl.innerHTML = data.pendingChannels.map((ch) => `
-        <div class="channel-card mb-2" style="padding:12px">
-          <div class="ch-avatar" style="width:40px;height:40px;font-size:1rem;cursor:pointer" onclick="openChannelDetail(${ch.id})">
-            ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : escapeHtml(ch.nom.charAt(0))}
-          </div>
-          <div class="ch-info" style="min-width:0">
-            <a href="javascript:void(0)" onclick="openChannelDetail(${ch.id})" class="ch-name" style="font-size:0.88rem;text-decoration:none">${escapeHtml(ch.nom)}</a>
-            <div class="ch-meta" style="font-size:0.72rem">
-              ${ch.subscriber_count ? `<span>${formatNumber(ch.subscriber_count)} abonnes</span>` : ""}
-              ${ch.llm_score != null ? `<span class="llm-score ${ch.llm_score >= 70 ? 'high' : ch.llm_score >= 40 ? 'medium' : 'low'}">${ch.llm_score}/100</span>` : ""}
-            </div>
-          </div>
-          <button class="btn btn-success-glass btn-sm" onclick="validateChannel(${ch.id})" title="Valider" style="padding:4px 8px;font-size:0.7rem">
-            <i class="bi bi-check-lg"></i>
-          </button>
-        </div>
-      `).join("");
-    }
-
-    // Top channels
-    const topEl = document.getElementById("home-top-channels");
-    if (data.topChannels.length === 0) {
-      topEl.innerHTML = '<div class="text-muted" style="font-size:0.85rem">Aucune chaine validee</div>';
-    } else {
-      topEl.innerHTML = data.topChannels.map((ch) => `
-        <div class="channel-card mb-2" style="padding:12px">
-          <div class="ch-avatar" style="width:40px;height:40px;font-size:1rem;cursor:pointer" onclick="openChannelDetail(${ch.id})">
-            ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : escapeHtml(ch.nom.charAt(0))}
-          </div>
-          <div class="ch-info" style="min-width:0">
-            <a href="javascript:void(0)" onclick="openChannelDetail(${ch.id})" class="ch-name" style="font-size:0.88rem;text-decoration:none">${escapeHtml(ch.nom)}</a>
-            <div class="ch-meta" style="font-size:0.72rem">
-              <span>${ch.video_count || 0} videos</span>
-              ${ch.llm_score != null ? `<span class="llm-score ${ch.llm_score >= 70 ? 'high' : ch.llm_score >= 40 ? 'medium' : 'low'}">${ch.llm_score}/100</span>` : ""}
-            </div>
-          </div>
-        </div>
-      `).join("");
-    }
-  } catch (err) {
-    console.error("[loadDashboard]", err);
-    document.getElementById("home-recent-videos").innerHTML = '<div class="col-12 text-muted text-center py-4">Erreur de chargement</div>';
-  }
-}
 
 // --- Batch Import ---
 async function batchImport() {
@@ -1733,6 +1643,11 @@ async function loadChannelPreview(channelId, videos = null) {
   }
 }
 
+// Fallback if stored page no longer exists
+if (!document.getElementById(`page-${currentPage}`)) {
+  currentPage = "videos";
+  localStorage.setItem("youfind-page", "videos");
+}
 navigateTo(currentPage);
 loadStats();
 loadLLMHealth();

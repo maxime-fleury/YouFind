@@ -25,11 +25,6 @@
       <div class="collapse navbar-collapse" id="navContent">
         <ul class="navbar-nav ms-auto gap-1">
           <li class="nav-item">
-            <button class="nav-link btn btn-nav" data-page="home">
-              <i class="bi bi-house-heart"></i> Accueil
-            </button>
-          </li>
-          <li class="nav-item">
             <button class="nav-link btn btn-nav" data-page="videos">
               <i class="bi bi-camera-reels"></i> Videos
             </button>
@@ -50,16 +45,6 @@
             </button>
           </li>
           <li class="nav-item">
-            <button class="nav-link btn btn-nav" data-page="topics">
-              <i class="bi bi-tags"></i> Topics
-            </button>
-          </li>
-          <li class="nav-item">
-            <button class="nav-link btn btn-nav" data-page="feedback">
-              <i class="bi bi-journal-text"></i> Feedback
-            </button>
-          </li>
-          <li class="nav-item">
             <button class="nav-link btn btn-nav" data-page="settings">
               <i class="bi bi-gear"></i> Settings
             </button>
@@ -73,27 +58,7 @@
 
     <div id="stats-bar" class="row g-3 mb-4"></div>
 
-    <div id="page-home" class="page-content">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2 class="section-title"><i class="bi bi-house-heart"></i> Accueil</h2>
-      </div>
-      <div class="row g-4">
-        <div class="col-lg-8">
-          <h5 class="text-purple-light mb-3"><i class="bi bi-camera-reels"></i> Videos recentes</h5>
-          <div id="home-recent-videos" class="row g-3"></div>
-        </div>
-        <div class="col-lg-4">
-          <div class="mb-4">
-            <h5 class="text-purple-light mb-3"><i class="bi bi-hourglass-split"></i> En attente</h5>
-            <div id="home-pending"></div>
-          </div>
-          <div>
-            <h5 class="text-purple-light mb-3"><i class="bi bi-star-fill"></i> Top chaines</h5>
-            <div id="home-top-channels"></div>
-          </div>
-        </div>
-      </div>
-    </div>
+
 
     <div id="page-videos" class="page-content d-none">
       <div class="videos-header mb-4">
@@ -155,6 +120,7 @@
         <select id="channel-filter" class="form-select form-select-glass" onchange="loadChannels()" style="width:auto;min-width:120px">
           <option value="pending" selected>En attente</option>
           <option value="validated">Validees</option>
+          <option value="rejected">Rejetees</option>
           <option value="">Toutes</option>
         </select>
         <button class="btn btn-glass" onclick="refreshAllChannelStats()" id="refresh-stats-btn" title="Mettre a jour les stats de toutes les chaines">
@@ -169,33 +135,30 @@
       <div id="discover-method-badge" class="mb-3"></div>
       <div class="glass-card p-4 mb-4">
         <div class="row g-3 align-items-end">
-          <div class="col-md-5">
-            <label class="form-label text-purple-light">Rechercher un topic</label>
-            <input type="text" id="discover-input" class="form-control form-control-glass" 
-                   placeholder="ex: machine learning, cuisine japonaise, dev web...">
+          <div class="col-md-8">
+            <input type="text" id="discover-input" class="form-control form-control-glass"
+                   placeholder="ex: machine learning, cuisine japonaise, dev web..."
+                   onkeydown="if(event.key==='Enter')runDiscovery()">
           </div>
           <div class="col-md-2">
-            <label class="form-label text-purple-light">Offset</label>
-            <input type="number" id="discover-offset" class="form-control form-control-glass" value="0" min="0" step="10">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label text-purple-light">Nb resultats</label>
-            <select id="discover-count" class="form-select form-select-glass">
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="20" selected>20</option>
-              <option value="30">30</option>
-            </select>
-          </div>
-          <div class="col-md-4">
             <button class="btn btn-primary-glass w-100" onclick="runDiscovery()">
-              <i class="bi bi-search"></i> Rechercher
+              <i class="bi bi-search"></i> Decouvrir
+            </button>
+          </div>
+          <div class="col-md-2">
+            <button class="btn btn-glass w-100" onclick="addTopic()">
+              <i class="bi bi-plus-lg"></i> Ajouter
             </button>
           </div>
         </div>
         <div id="discover-status" class="mt-3"></div>
       </div>
       <div id="discover-results"></div>
+
+      <div class="glass-card p-4 mb-4">
+        <h5 class="text-purple-light mb-3"><i class="bi bi-tags"></i> Topics</h5>
+        <div id="topics-grid" class="row g-3"></div>
+      </div>
       <div class="glass-card p-4 mt-4">
         <div class="d-flex justify-content-between align-items-start">
           <div>
@@ -241,30 +204,7 @@
       <div id="related-results"></div>
     </div>
 
-    <div id="page-topics" class="page-content d-none">
-      <h2 class="section-title mb-3"><i class="bi bi-tags"></i> Topics</h2>
-      <div class="glass-card p-4 mb-4">
-        <div class="row g-3">
-          <div class="col-md-5">
-            <input type="text" id="topic-nom" class="form-control form-control-glass" placeholder="Nom du topic">
-          </div>
-          <div class="col-md-5">
-            <input type="text" id="topic-desc" class="form-control form-control-glass" placeholder="Description (optionnel)">
-          </div>
-          <div class="col-md-2">
-            <button class="btn btn-primary-glass w-100" onclick="addTopic()">
-              <i class="bi bi-plus-lg"></i> Ajouter
-            </button>
-          </div>
-        </div>
-      </div>
-      <div id="topics-list"></div>
-    </div>
 
-    <div id="page-feedback" class="page-content d-none">
-      <h2 class="section-title mb-3"><i class="bi bi-journal-text"></i> Historique des rejets</h2>
-      <div id="feedback-list"></div>
-    </div>
 
     <div id="page-settings" class="page-content d-none">
       <h2 class="section-title mb-3"><i class="bi bi-gear"></i> Settings</h2>
