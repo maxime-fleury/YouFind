@@ -13,12 +13,13 @@
 </head>
 <body>
 
-  <nav class="navbar navbar-expand-lg glass-nav">
+  <nav class="navbar navbar-expand-lg glass-nav position-relative">
     <div class="container-fluid px-4">
       <a class="navbar-brand d-flex align-items-center gap-2" href="#" onclick="navigateTo('videos')">
         <img src="/favicon.svg" alt="YouFind" class="brand-logo" width="36" height="36">
         <span class="brand-text">YouFind</span>
       </a>
+      <div id="toast-container" class="toast-container position-absolute" style="top:50%;left:50%;transform:translate(-50%,-50%);z-index:1030;pointer-events:none"></div>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
         <i class="bi bi-list text-white fs-4"></i>
       </button>
@@ -435,8 +436,6 @@
       </div>
     </div>
   </div>
-
-  <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3"></div>
 
   <!-- Video player modal -->
   <div class="player-backdrop" id="playerBackdrop">

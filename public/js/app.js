@@ -119,12 +119,12 @@ function showToast(message, type = "info") {
   };
 
   const toast = document.createElement("div");
-  toast.className = "glass-card-dark p-3 mb-2";
-  toast.style.cssText = `border-left: 3px solid ${colors[type]}; min-width: 280px; animation: slideIn 0.3s ease;`;
+  toast.className = "glass-card-dark px-3 py-2";
+  toast.style.cssText = `border-left: 3px solid ${colors[type]}; min-width: 200px; max-width:360px; animation: slideIn 0.3s ease; pointer-events:auto;`;
   toast.innerHTML = `
     <div class="d-flex align-items-center gap-2">
       <i class="bi ${icons[type]}" style="color:${colors[type]}"></i>
-      <span style="font-size:0.88rem">${escapeHtml(message)}</span>
+      <span style="font-size:0.82rem">${escapeHtml(message)}</span>
     </div>
   `;
   container.appendChild(toast);
