@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="/css/style.css?v=20260801-4" rel="stylesheet">
+  <link href="/css/style.css?v=20260801-7" rel="stylesheet">
 </head>
 <body>
 
@@ -149,33 +149,66 @@
     </div>
 
     <div id="page-discover" class="page-content d-none">
-      <h2 class="section-title mb-3"><i class="bi bi-compass"></i> Decouvrir de nouvelles chaines</h2>
-      <div id="discover-method-badge" class="mb-3"></div>
-      <div class="glass-card p-4 mb-4">
-        <div class="row g-3 align-items-end">
-          <div class="col-md-8">
-            <input type="text" id="discover-input" class="form-control form-control-glass"
-                   placeholder="ex: machine learning, cuisine japonaise, dev web..."
-                   onkeydown="if(event.key==='Enter')runDiscovery()">
-          </div>
-          <div class="col-md-2">
-            <button class="btn btn-primary-glass w-100" onclick="runDiscovery()">
-              <i class="bi bi-search"></i> Decouvrir
-            </button>
-          </div>
-          <div class="col-md-2">
-            <button class="btn btn-glass w-100" onclick="addTopic()">
-              <i class="bi bi-plus-lg"></i> Ajouter
-            </button>
-          </div>
+      <div class="discover-hero mb-4">
+        <div class="discover-hero-copy">
+          <span class="discover-eyebrow"><i class="bi bi-stars"></i> Recherche guidée</span>
+          <h2 class="section-title mb-2"><i class="bi bi-compass"></i> Découvrir de nouvelles chaînes</h2>
+          <p class="text-muted mb-0">Décris un sujet et YouFind repère des créateurs pertinents, sans algorithme ni abonnement obligatoire.</p>
         </div>
-        <div id="discover-status" class="mt-3"></div>
+        <div class="discover-hero-orbit" aria-hidden="true"><i class="bi bi-compass"></i><span></span><b></b></div>
       </div>
-      <div id="discover-results"></div>
 
-      <div class="glass-card p-4 mb-4">
-        <h5 class="text-purple-light mb-3"><i class="bi bi-tags"></i> Topics</h5>
-        <div id="topics-grid" class="row g-3"></div>
+      <div class="discover-search-card glass-card p-4 mb-4">
+        <div class="discover-search-heading">
+          <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <h5 class="mb-1">Que veux-tu explorer ?</h5>
+              <div id="discover-method-badge"></div>
+            </div>
+            <p class="text-muted mb-0">Exemples : machine learning, cuisine japonaise, histoire de l'art...</p>
+          </div>
+          <span class="discover-free-note"><i class="bi bi-lightning-charge-fill"></i> Scraping gratuit</span>
+        </div>
+        <form class="discover-form mt-3" onsubmit="event.preventDefault();runDiscovery()">
+          <label class="visually-hidden" for="discover-input">Sujet à découvrir</label>
+          <div class="discover-input-wrap">
+            <i class="bi bi-search"></i>
+            <input type="search" id="discover-input" class="form-control form-control-glass" placeholder="Ex: développement web, photo nature..." autocomplete="off" oninput="updateDiscoverInputState()">
+            <button type="button" class="discover-input-clear d-none" id="discover-input-clear" onclick="clearDiscoveryInput()" aria-label="Effacer la recherche"><i class="bi bi-x-lg"></i></button>
+          </div>
+          <button class="btn btn-primary-glass discover-submit" id="discover-submit" type="submit"><i class="bi bi-compass"></i> Explorer</button>
+          <button class="btn btn-glass discover-save-topic" id="discover-save-topic" type="button" onclick="addTopic()" title="Enregistrer ce sujet dans tes topics"><i class="bi bi-bookmark-plus"></i> Garder le topic</button>
+        </form>
+        <div class="discover-suggestions mt-3" aria-label="Suggestions de recherche">
+          <span class="discover-suggestions-label">Idées rapides</span>
+          <button type="button" class="discover-suggestion" onclick="useDiscoverySuggestion('Intelligence artificielle')">Intelligence artificielle</button>
+          <button type="button" class="discover-suggestion" onclick="useDiscoverySuggestion('Histoire')">Histoire</button>
+          <button type="button" class="discover-suggestion" onclick="useDiscoverySuggestion('Photographie')">Photographie</button>
+          <button type="button" class="discover-suggestion" onclick="useDiscoverySuggestion('Finance personnelle')">Finance personnelle</button>
+        </div>
+        <div id="discover-status" class="discover-status mt-3" aria-live="polite"></div>
+      </div>
+
+      <div class="discover-section-heading mb-3">
+        <div>
+          <span class="discover-section-kicker"><i class="bi bi-grid-3x3-gap"></i> Résultats</span>
+          <h4 class="mb-1">Chaînes recommandées</h4>
+          <p class="text-muted mb-0" id="discover-results-subtitle">Lance une recherche pour commencer ton exploration.</p>
+        </div>
+        <button class="btn btn-sm-glass d-none" id="discover-clear-results" onclick="clearDiscoveryResults()"><i class="bi bi-eraser"></i> Effacer</button>
+      </div>
+      <div id="discover-results" class="discover-results-list"></div>
+
+      <div class="glass-card topics-panel p-4 mb-4">
+        <div class="topics-panel-heading">
+          <div>
+            <span class="discover-section-kicker"><i class="bi bi-bookmarks"></i> Ta bibliothèque</span>
+            <h5 class="mb-1">Topics sauvegardés</h5>
+            <p class="text-muted mb-0">Retrouve tes sujets favoris et relance une exploration en un clic.</p>
+          </div>
+          <span id="topics-count" class="settings-state"><i class="bi bi-tag"></i> 0 topic</span>
+        </div>
+        <div id="topics-grid" class="topics-grid-modern mt-3"></div>
       </div>
       <div class="glass-card p-4 mt-4">
         <div class="d-flex justify-content-between align-items-start">
@@ -245,83 +278,137 @@
 
 
     <div id="page-settings" class="page-content d-none">
-      <h2 class="section-title mb-3"><i class="bi bi-gear"></i> Settings</h2>
-
-      <div class="glass-card p-4 mb-4">
-        <h5 class="text-purple-light mb-3"><i class="bi bi-collection-play"></i> YouTube</h5>
-        <div class="row g-3">
-          <div class="col-md-12">
-            <label class="form-label">API Key</label>
-            <input type="password" id="set-youtube_api_key" class="form-control form-control-glass" 
-                   placeholder="AIza...">
-            <div class="form-text text-muted">Google Cloud Console > YouTube Data API v3</div>
-          </div>
+      <div class="settings-hero mb-4">
+        <div>
+          <span class="settings-eyebrow"><i class="bi bi-sliders2"></i> Configuration locale</span>
+          <h2 class="section-title mb-1"><i class="bi bi-gear"></i> Réglages</h2>
+          <p class="text-muted mb-0">Connecte tes services et choisis le moteur qui alimentera tes scores LLM.</p>
         </div>
+        <div class="settings-hero-icon" aria-hidden="true"><i class="bi bi-toggles2"></i></div>
       </div>
 
-      <div class="glass-card p-4 mb-4">
-        <h5 class="text-purple-light mb-3"><i class="bi bi-robot"></i> LLM Provider</h5>
-        <div class="row g-3">
-          <div class="col-md-4">
-            <label class="form-label">Provider</label>
-            <select id="set-llm_provider" class="form-select form-select-glass" onchange="toggleLLMFields()">
-              <option value="ollama">Ollama (local)</option>
-              <option value="lmstudio">LM Studio (local)</option>
-              <option value="openrouter">OpenRouter (cloud)</option>
-            </select>
-          </div>
-
-          <div class="col-md-12" id="ollama-fields">
-            <div class="row g-3">
-              <div class="col-md-8">
-                <label class="form-label">Ollama URL</label>
-                <input type="text" id="set-ollama_url" class="form-control form-control-glass" placeholder="http://localhost:11434">
+      <div class="row g-4 settings-layout">
+        <div class="col-xl-8">
+          <div class="glass-card settings-card p-4 mb-4">
+            <div class="settings-card-heading">
+              <div class="settings-card-icon youtube"><i class="bi bi-youtube"></i></div>
+              <div>
+                <h5 class="mb-1">YouTube Data API</h5>
+                <p class="text-muted mb-0">Optionnelle : utilisée uniquement en secours quand le scraping ne suffit pas.</p>
               </div>
-              <div class="col-md-4">
-                <label class="form-label">Model</label>
-                <input type="text" id="set-ollama_model" class="form-control form-control-glass" placeholder="llama3.2:3b">
+              <span id="youtube-key-status" class="settings-state"><i class="bi bi-shield-lock"></i> Non configurée</span>
+            </div>
+            <div class="settings-field mt-4">
+              <label class="form-label" for="set-youtube_api_key">Clé API</label>
+              <div class="secret-input-wrap">
+                <i class="bi bi-key secret-input-icon"></i>
+                <input type="password" id="set-youtube_api_key" class="form-control form-control-glass secret-input" placeholder="AIza..." autocomplete="off" data-secret="true" data-configured="false">
+                <button type="button" class="secret-action" onclick="toggleSecret('set-youtube_api_key', this)" aria-label="Afficher la clé YouTube"><i class="bi bi-eye"></i></button>
+                <button type="button" class="secret-action secret-clear d-none" onclick="clearSecret('set-youtube_api_key')" aria-label="Supprimer la clé YouTube"><i class="bi bi-x-lg"></i></button>
               </div>
+              <div class="form-text"><i class="bi bi-lock-fill"></i> La valeur existante n'est jamais renvoyée au navigateur. Laisse vide pour la conserver.</div>
             </div>
           </div>
 
-          <div class="col-md-12 d-none" id="lmstudio-fields">
-            <div class="row g-3">
-              <div class="col-md-8">
-                <label class="form-label">LM Studio URL</label>
-                <input type="text" id="set-lmstudio_url" class="form-control form-control-glass" placeholder="http://localhost:1234">
+          <div class="glass-card settings-card p-4 mb-4">
+            <div class="settings-card-heading mb-4">
+              <div class="settings-card-icon llm"><i class="bi bi-robot"></i></div>
+              <div>
+                <h5 class="mb-1">Moteur LLM</h5>
+                <p class="text-muted mb-0">Choisis où exécuter l'analyse des chaînes.</p>
               </div>
-              <div class="col-md-4">
-                <label class="form-label">Model</label>
-                <input type="text" id="set-lmstudio_model" class="form-control form-control-glass" placeholder="default">
+              <div id="llm-health" class="settings-health"></div>
+            </div>
+
+            <div class="provider-picker mb-4">
+              <label class="form-label" for="set-llm_provider">Fournisseur</label>
+              <select id="set-llm_provider" class="form-select form-select-glass" onchange="toggleLLMFields()">
+                <option value="ollama">Ollama · local et privé</option>
+                <option value="lmstudio">LM Studio · local et privé</option>
+                <option value="openrouter">OpenRouter · cloud</option>
+              </select>
+              <div id="provider-hint" class="provider-hint"><i class="bi bi-lightning-charge"></i> Les données restent sur cet ordinateur.</div>
+            </div>
+
+            <div class="provider-panel" id="ollama-fields">
+              <div class="provider-panel-heading"><span class="provider-dot local"></span><strong>Connexion Ollama</strong><span class="settings-chip">LOCAL</span></div>
+              <div class="row g-3 mt-1">
+                <div class="col-md-8">
+                  <label class="form-label" for="set-ollama_url">Adresse du serveur</label>
+                  <input type="url" id="set-ollama_url" class="form-control form-control-glass" placeholder="http://localhost:11434" autocomplete="url">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="set-ollama_model">Modèle</label>
+                  <input type="text" id="set-ollama_model" class="form-control form-control-glass" placeholder="llama3.2:3b" autocomplete="off">
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="col-md-12 d-none" id="openrouter-fields">
-            <div class="row g-3">
-              <div class="col-md-8">
-                <label class="form-label">API Key</label>
-                <input type="password" id="set-openrouter_key" class="form-control form-control-glass" placeholder="sk-or-...">
+            <div class="provider-panel d-none" id="lmstudio-fields">
+              <div class="provider-panel-heading"><span class="provider-dot local"></span><strong>Connexion LM Studio</strong><span class="settings-chip">LOCAL</span></div>
+              <div class="row g-3 mt-1">
+                <div class="col-md-8">
+                  <label class="form-label" for="set-lmstudio_url">Adresse du serveur</label>
+                  <input type="url" id="set-lmstudio_url" class="form-control form-control-glass" placeholder="http://localhost:1234" autocomplete="url">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="set-lmstudio_model">Modèle</label>
+                  <input type="text" id="set-lmstudio_model" class="form-control form-control-glass" placeholder="default" autocomplete="off">
+                </div>
               </div>
-              <div class="col-md-4">
-                <label class="form-label">Model</label>
-                <input type="text" id="set-openrouter_model" class="form-control form-control-glass" placeholder="meta-llama/llama-3.1-8b-instruct:free">
+            </div>
+
+            <div class="provider-panel d-none" id="openrouter-fields">
+              <div class="provider-panel-heading"><span class="provider-dot cloud"></span><strong>Connexion OpenRouter</strong><span class="settings-chip cloud">CLOUD</span></div>
+              <div class="row g-3 mt-1">
+                <div class="col-md-8">
+                  <label class="form-label" for="set-openrouter_key">Clé API</label>
+                  <div class="secret-input-wrap">
+                    <i class="bi bi-key secret-input-icon"></i>
+                    <input type="password" id="set-openrouter_key" class="form-control form-control-glass secret-input" placeholder="sk-or-..." autocomplete="off" data-secret="true" data-configured="false">
+                    <button type="button" class="secret-action" onclick="toggleSecret('set-openrouter_key', this)" aria-label="Afficher la clé OpenRouter"><i class="bi bi-eye"></i></button>
+                    <button type="button" class="secret-action secret-clear d-none" onclick="clearSecret('set-openrouter_key')" aria-label="Supprimer la clé OpenRouter"><i class="bi bi-x-lg"></i></button>
+                  </div>
+                  <div class="form-text"><i class="bi bi-lock-fill"></i> Laisse vide pour conserver la clé actuelle.</div>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="set-openrouter_model">Modèle</label>
+                  <input type="text" id="set-openrouter_model" class="form-control form-control-glass" placeholder="meta-llama/llama-3.1-8b-instruct:free" autocomplete="off">
+                </div>
               </div>
+            </div>
+
+            <div class="settings-actions mt-4 pt-3">
+              <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-primary-glass" id="settings-save-btn" onclick="saveSettings()"><i class="bi bi-check-lg"></i> Enregistrer</button>
+                <button class="btn btn-glass" id="settings-test-btn" onclick="testLLMConnection()"><i class="bi bi-plug"></i> Tester la connexion</button>
+                <button class="btn btn-sm-glass" onclick="loadSettings()" title="Annuler les modifications"><i class="bi bi-arrow-counterclockwise"></i> Réinitialiser</button>
+              </div>
+              <span id="settings-save-state" class="settings-save-state" aria-live="polite"></span>
             </div>
           </div>
         </div>
 
-        <div class="mt-3 d-flex align-items-center gap-3">
-          <button class="btn btn-primary-glass" onclick="saveSettings()">
-            <i class="bi bi-check-lg"></i> Sauvegarder
-          </button>
-          <div id="llm-health" class="text-end flex-grow-1"></div>
-        </div>
-      </div>
+        <div class="col-xl-4">
+          <div class="glass-card settings-card settings-status-card p-4 mb-4">
+            <div class="settings-card-heading mb-3">
+              <div class="settings-card-icon status"><i class="bi bi-activity"></i></div>
+              <div><h5 class="mb-1">État des services</h5><p class="text-muted mb-0">Vérification en direct</p></div>
+            </div>
+            <div id="settings-status" class="settings-status-list">
+              <div class="settings-status-row"><span><i class="bi bi-robot"></i> Moteur LLM</span><span class="text-muted">En attente</span></div>
+              <div class="settings-status-row"><span><i class="bi bi-collection-play"></i> YouTube</span><span class="text-muted">Scraping actif</span></div>
+            </div>
+            <button class="btn btn-sm-glass w-100 mt-3" onclick="testLLMConnection()"><i class="bi bi-arrow-repeat"></i> Actualiser le diagnostic</button>
+          </div>
 
-      <div class="glass-card p-4">
-        <h5 class="text-purple-light mb-3"><i class="bi bi-info-circle"></i> Status</h5>
-        <div id="settings-status"></div>
+          <div class="glass-card settings-card settings-tips p-4">
+            <h6 class="text-purple-light mb-3"><i class="bi bi-stars"></i> Conseils rapides</h6>
+            <div class="settings-tip"><i class="bi bi-shield-check"></i><span>Ollama et LM Studio gardent tes prompts en local.</span></div>
+            <div class="settings-tip"><i class="bi bi-speedometer2"></i><span>Utilise un modèle déjà chargé pour accélérer le scoring.</span></div>
+            <div class="settings-tip"><i class="bi bi-cloud-check"></i><span>OpenRouter nécessite une clé et peut consommer des crédits.</span></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -472,6 +559,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/mark.min.js"></script>
-  <script src="/js/app.js?v=20260801-4"></script>
+  <script src="/js/app.js?v=20260801-7"></script>
 </body>
 </html>

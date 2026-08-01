@@ -299,7 +299,9 @@ const stmts = {
       COUNT(*) as total_channels,
       SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) as validated_channels,
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_channels,
-      (SELECT COUNT(*) FROM feedback_log WHERE decision = 'rejected') as rejected_channels,
+      SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_channels,
+      (SELECT COUNT(*) FROM feedback_log WHERE decision = 'rejected') as rejected_feedback_events,
+      ROUND(100.0 * SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN status != 'validated' THEN 1 ELSE 0 END), 0), 1) as validated_channel_ratio,
       (SELECT COUNT(*) FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND v.duration > 60) as total_videos,
       (SELECT COUNT(*) FROM topics) as total_topics
     FROM channels

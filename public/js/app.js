@@ -135,54 +135,110 @@ function showToast(message, type = "info") {
   }, 3500);
 }
 
+function formatStatCount(value) {
+  return Number(value || 0).toLocaleString("fr-FR");
+}
+
+function renderStatsLoading(container) {
+  container.innerHTML = `
+    <div class="col-12">
+      <section class="stats-overview stats-overview-loading" aria-label="Chargement des statistiques">
+        <div class="stats-overview-head">
+          <div class="stats-heading-skeleton"></div>
+          <div class="stats-total-skeleton"></div>
+        </div>
+        <div class="stats-grid">
+          ${Array.from({ length: 6 }, () => '<div class="stat-card stat-card-skeleton"><span></span><b></b><i></i></div>').join("")}
+        </div>
+      </section>
+    </div>`;
+}
+
 async function loadStats() {
+  const container = document.getElementById("stats-bar");
+  if (!container) return;
+  if (!container.dataset.loaded) renderStatsLoading(container);
+
   try {
     const stats = await api("/stats");
-    document.getElementById("stats-bar").innerHTML = `
-    <div class="col-6 col-md-3 col-lg-2">
-      <div class="stat-card">
-        <div class="stat-value">${stats.total_videos || 0}</div>
-        <div class="stat-label">Videos</div>
-      </div>
-    </div>
-    <div class="col-6 col-md-3 col-lg-2">
-      <div class="stat-card">
-        <div class="stat-value">${stats.validated_channels || 0}</div>
-        <div class="stat-label">Validees</div>
-      </div>
-    </div>
-    <div class="col-6 col-md-3 col-lg-2">
-      <div class="stat-card">
-        <div class="stat-value">${stats.pending_channels || 0}</div>
-        <div class="stat-label">En attente</div>
-      </div>
-    </div>
-    <div class="col-6 col-md-3 col-lg-2">
-      <div class="stat-card">
-        <div class="stat-value">${stats.rejected_channels || 0}</div>
-        <div class="stat-label">Rejetees</div>
-      </div>
-    </div>
-    <div class="col-6 col-md-3 col-lg-2">
-      <div class="stat-card">
-        <div class="stat-value">${stats.total_topics || 0}</div>
-        <div class="stat-label">Topics</div>
-      </div>
-    </div>
-    <div class="col-6 col-md-3 col-lg-2" id="quota-stat">
-      <div class="stat-card">
-        <div class="stat-value" id="quota-value" style="font-size:1.2rem">--</div>
-        <div class="stat-label">Quota API</div>
-        <div style="height:3px;background:var(--glass-border);border-radius:2px;margin-top:4px">
-          <div id="quota-bar" style="height:100%;width:0%;background:var(--accent-green);border-radius:2px;transition:width 0.3s"></div>
-        </div>
-      </div>
-    </div>
-    `;
+    const validated = Number(stats.validated_channels) || 0;
+    const pending = Number(stats.pending_channels) || 0;
+    const rejected = Number(stats.rejected_channels) || 0;
+    const toReview = pending + rejected;
+    const ratio = Number(stats.validated_channel_ratio) || 0;
+    const total = Number(stats.total_channels) || validated + toReview;
+    const ratioWidth = Math.min(100, Math.max(0, ratio));
+
+    container.innerHTML = `
+      <div class="col-12">
+        <section class="stats-overview" aria-label="Vue d'ensemble des statistiques">
+          <div class="stats-overview-head">
+            <div>
+              <span class="stats-eyebrow"><i class="bi bi-bar-chart-line-fill"></i> Tableau de bord</span>
+              <h2 class="stats-overview-title">Vue d'ensemble</h2>
+              <p class="stats-overview-subtitle">Un aperçu rapide de ta bibliothèque et de ta file de tri.</p>
+            </div>
+            <div class="stats-total-pill">
+              <span class="stats-total-icon"><i class="bi bi-collection-play-fill"></i></span>
+              <span><strong>${formatStatCount(total)}</strong> chaînes suivies</span>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card stats-card--validated">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-check2-circle"></i></span><span class="stats-card-kicker">Bibliothèque</span></div>
+              <div class="stat-value">${formatStatCount(validated)}</div>
+              <div class="stat-label">Chaînes validées</div>
+              <div class="stat-detail">Dans ton feed vidéo</div>
+            </article>
+            <article class="stat-card stats-card--pending">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-hourglass-split"></i></span><span class="stats-card-kicker">À décider</span></div>
+              <div class="stat-value">${formatStatCount(pending)}</div>
+              <div class="stat-label">En attente</div>
+              <div class="stat-detail">Prêtes pour ton tri</div>
+            </article>
+            <article class="stat-card stats-card--rejected">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-x-circle"></i></span><span class="stats-card-kicker">Historique</span></div>
+              <div class="stat-value">${formatStatCount(rejected)}</div>
+              <div class="stat-label">Rejetées</div>
+              <div class="stat-detail">Exclues de la sélection</div>
+            </article>
+            <article class="stat-card stat-card-ratio stats-card--ratio">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-pie-chart-fill"></i></span><span class="stats-card-kicker">Progression</span></div>
+              <div class="stat-value">${ratio.toFixed(1)}%</div>
+              <div class="stat-label">Validées / (rejetées + attente)</div>
+              <div class="stat-detail">${formatStatCount(validated)} validées sur ${formatStatCount(toReview)} à traiter</div>
+              <div class="stat-progress" role="progressbar" aria-label="Ratio des chaînes validées sur les chaînes rejetées et en attente" aria-valuenow="${ratio}" aria-valuemin="0" aria-valuemax="100"><div style="width:${ratioWidth}%"></div></div>
+            </article>
+            <article class="stat-card stats-card--topics">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-bookmark-star-fill"></i></span><span class="stats-card-kicker">Organisation</span></div>
+              <div class="stat-value">${formatStatCount(stats.total_topics)}</div>
+              <div class="stat-label">Topics</div>
+              <div class="stat-detail">Pour classer tes chaînes</div>
+            </article>
+            <article class="stat-card stats-card--quota" id="quota-stat">
+              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-lightning-charge-fill"></i></span><span class="stats-card-kicker">YouTube API</span></div>
+              <div class="stat-value" id="quota-value">--</div>
+              <div class="stat-label">Quota utilisé</div>
+              <div class="stat-detail">Requêtes consommées aujourd'hui</div>
+              <div class="stat-progress" aria-hidden="true"><div id="quota-bar" style="width:0%"></div></div>
+            </article>
+          </div>
+        </section>
+      </div>`;
+    container.dataset.loaded = "true";
     loadQuota();
   } catch (err) {
     console.error("Failed to load stats:", err);
-    document.getElementById("stats-bar").innerHTML = '';
+    delete container.dataset.loaded;
+    container.innerHTML = `
+      <div class="col-12">
+        <div class="stats-error" role="alert">
+          <span class="stats-error-icon"><i class="bi bi-bar-chart-line"></i></span>
+          <div><strong>Statistiques indisponibles</strong><p>Impossible de récupérer les chiffres pour le moment.</p></div>
+          <button class="btn btn-sm-glass" onclick="loadStats()"><i class="bi bi-arrow-clockwise"></i> Réessayer</button>
+        </div>
+      </div>`;
   }
 }
 
@@ -524,75 +580,130 @@ function renderChannels(searchQuery) {
   });
 }
 
+let isDiscovering = false;
+
+function updateDiscoverInputState() {
+  const input = document.getElementById("discover-input");
+  const clearButton = document.getElementById("discover-input-clear");
+  if (!input) return;
+  clearButton?.classList.toggle("d-none", !input.value.trim() || isDiscovering);
+}
+
+function clearDiscoveryInput() {
+  const input = document.getElementById("discover-input");
+  if (!input || isDiscovering) return;
+  input.value = "";
+  input.focus();
+  updateDiscoverInputState();
+}
+
+function useDiscoverySuggestion(topic) {
+  const input = document.getElementById("discover-input");
+  if (!input || isDiscovering) return;
+  input.value = topic;
+  updateDiscoverInputState();
+  runDiscovery();
+}
+
 async function loadTopics() {
   const grid = document.getElementById("topics-grid");
+  const count = document.getElementById("topics-count");
+  if (!grid) return;
+  grid.innerHTML = '<div class="topics-loading"><span class="spinner-glass"></span> Chargement des topics...</div>';
   try {
     const topics = await api("/topics");
+    if (count) count.innerHTML = `<i class="bi bi-tag"></i> ${topics.length} topic${topics.length === 1 ? "" : "s"}`;
 
-    if (topics.length === 0) {
+    if (!topics.length) {
       grid.innerHTML = `
-        <div class="col-12">
-          <div class="empty-state">
-            <i class="bi bi-tags"></i>
-            <h5>Aucun topic</h5>
-            <p>Ajoute un topic pour lancer la decouverte.</p>
-          </div>
+        <div class="topics-empty">
+          <i class="bi bi-bookmark-heart"></i>
+          <div><strong>Aucun topic sauvegardé</strong><p class="mb-0">Enregistre une recherche pour la retrouver ici.</p></div>
         </div>`;
       return;
     }
 
-    grid.innerHTML = topics
-      .map(
-        (t) => `
-      <div class="col-sm-6 col-md-4 col-lg-3">
-        <div class="glass-card p-3 h-100 d-flex flex-column">
-          <div class="flex-grow-1 mb-2">
-            <div class="topic-name">${escapeHtml(t.nom)}</div>
-            ${t.description ? `<div class="topic-desc mt-1">${escapeHtml(t.description)}</div>` : ""}
-          </div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-primary-glass btn-sm flex-grow-1" onclick="discoverTopic('${escapeInlineJs(t.nom)}')" title="Decouvrir">
-              <i class="bi bi-compass"></i> Decouvrir
-            </button>
-            <button class="btn btn-sm-glass" onclick="deleteTopic(${t.id})" title="Supprimer">
-              <i class="bi bi-trash3"></i>
-            </button>
-          </div>
-        </div>
-      </div>`
-      )
-      .join("");
+    grid.innerHTML = topics.map((t) => `
+      <div class="topic-card-modern">
+        <button class="topic-card-main" type="button" onclick="discoverTopic('${escapeInlineJs(t.nom)}')" title="Explorer ${escapeHtml(t.nom)}">
+          <span class="topic-card-icon"><i class="bi bi-hash"></i></span>
+          <span class="topic-card-copy"><strong>${escapeHtml(t.nom)}</strong>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ""}</span>
+          <i class="bi bi-arrow-up-right topic-card-arrow"></i>
+        </button>
+        <button class="topic-card-delete" type="button" onclick="deleteTopic(${t.id})" title="Supprimer ${escapeHtml(t.nom)}" aria-label="Supprimer ${escapeHtml(t.nom)}"><i class="bi bi-trash3"></i></button>
+      </div>`).join("");
   } catch (err) {
     console.error("[loadTopics]", err);
-    grid.innerHTML = '<div class="col-12"><div class="empty-state"><p class="text-muted">Erreur de chargement des topics</p></div></div>';
+    if (count) count.textContent = "Indisponible";
+    grid.innerHTML = '<div class="topics-empty error"><i class="bi bi-exclamation-triangle"></i><div><strong>Impossible de charger les topics</strong><p class="mb-0">Réessaie dans un instant.</p></div></div>';
   }
 }
 
 function discoverTopic(topicName) {
-  document.getElementById("discover-input").value = topicName;
+  const input = document.getElementById("discover-input");
+  if (!input) return;
+  input.value = topicName;
   navigateTo("discover");
+  updateDiscoverInputState();
   runDiscovery();
 }
 
 async function addTopic() {
-  const nom = document.getElementById("discover-input").value.trim();
-  if (!nom) return showToast("Entrez un nom de topic", "error");
+  const input = document.getElementById("discover-input");
+  const nom = input?.value.trim();
+  if (!nom) return showToast("Saisis un sujet avant de le sauvegarder", "error");
 
-  await api("/topics", {
-    method: "POST",
-    body: JSON.stringify({ nom, description: "" }),
-  });
-  document.getElementById("discover-input").value = "";
-  showToast("Topic ajoute", "success");
-  loadTopics();
-  populateTopicFilter();
+  const button = document.getElementById("discover-save-topic");
+  if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-glass spinner-glass-sm"></span> Sauvegarde...'; }
+  try {
+    await api("/topics", { method: "POST", body: JSON.stringify({ nom, description: "" }) });
+    showToast("Topic sauvegardé", "success");
+    await loadTopics();
+    populateTopicFilter();
+  } catch (err) {
+    showToast("Impossible de sauvegarder le topic : " + err.message, "error");
+  } finally {
+    if (button) { button.disabled = false; button.innerHTML = '<i class="bi bi-bookmark-plus"></i> Garder le topic'; }
+  }
 }
 
 async function deleteTopic(id) {
-  await api(`/topics?id=${id}`, { method: "DELETE" });
-  showToast("Topic supprime", "info");
-  loadTopics();
-  populateTopicFilter();
+  if (!confirm("Supprimer ce topic ?")) return;
+  try {
+    await api(`/topics?id=${id}`, { method: "DELETE" });
+    showToast("Topic supprimé", "info");
+    await loadTopics();
+    populateTopicFilter();
+  } catch (err) {
+    showToast("Impossible de supprimer le topic : " + err.message, "error");
+  }
+}
+
+function renderDiscoveryResults(channels, currentChannels) {
+  const results = document.getElementById("discover-results");
+  if (!results) return;
+  const byChannelId = new Map((currentChannels || []).map((ch) => [ch.channel_id, ch]));
+  const labels = { pending: "En attente", validated: "Validée", rejected: "Rejetée" };
+
+  if (!channels.length) {
+    results.innerHTML = `<div class="discover-empty-results"><i class="bi bi-compass"></i><h5>Aucune chaîne trouvée</h5><p>Essaie un sujet plus précis ou une autre formulation.</p></div>`;
+    return;
+  }
+
+  results.innerHTML = channels.map((ch) => {
+    const channelId = safeChannelId(ch.channelId);
+    const existing = byChannelId.get(ch.channelId);
+    const state = existing?.status || "pending";
+    const stateClass = state === "validated" ? "validated" : state === "rejected" ? "rejected" : "pending";
+    const action = state === "pending"
+      ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${channelId}')" title="Valider cette chaîne"><i class="bi bi-check-lg"></i><span>Valider</span></button><button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${channelId}', '${escapeInlineJs(ch.nom)}')" title="Rejeter cette chaîne"><i class="bi bi-x-lg"></i><span>Rejeter</span></button>`
+      : `<span class="discover-processed"><i class="bi bi-${state === "validated" ? "check-circle" : "x-circle"}"></i> ${labels[state]}</span>`;
+    return `<article class="discover-result discover-result-modern" id="dr-${channelId}">
+      <div class="dr-avatar">${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="Miniature de ${escapeHtml(ch.nom)}" loading="lazy">` : '<i class="bi bi-person"></i>'}</div>
+      <div class="dr-info"><div class="dr-title-row"><a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener noreferrer" class="dr-name">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right"></i></a><span class="status-badge ${stateClass}">${labels[state]}</span></div><div class="dr-stats"><i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnés <span class="dr-dot">·</span><span>${state === "pending" ? "À trier" : "Déjà traitée"}</span></div></div>
+      <div class="dr-actions">${action}</div>
+    </article>`;
+  }).join("");
 }
 
 async function runDiscovery() {
@@ -600,65 +711,60 @@ async function runDiscovery() {
   const status = document.getElementById("discover-status");
   const results = document.getElementById("discover-results");
   const badge = document.getElementById("discover-method-badge");
-  const topicQuery = input.value.trim();
-  if (!topicQuery) return showToast("Entrez un topic", "error");
+  const submit = document.getElementById("discover-submit");
+  const topicQuery = input?.value.trim();
+  if (!topicQuery || isDiscovering) {
+    if (!topicQuery) showToast("Saisis un sujet à explorer", "error");
+    return;
+  }
+
+  isDiscovering = true;
+  if (submit) { submit.disabled = true; submit.innerHTML = '<span class="spinner-glass spinner-glass-sm"></span> Exploration...'; }
+  if (input) input.disabled = true;
+  document.getElementById("discover-save-topic")?.setAttribute("disabled", "true");
+  updateDiscoverInputState();
+  if (badge) badge.innerHTML = '<span class="status-badge pending"><i class="bi bi-search"></i> Recherche en cours</span>';
+  if (status) status.innerHTML = '<span class="spinner-glass"></span> Exploration de YouTube en cours...';
+  if (results) results.innerHTML = '<div class="discover-loading-grid"><div class="discover-skeleton"></div><div class="discover-skeleton"></div><div class="discover-skeleton"></div></div>';
+  document.getElementById("discover-results-subtitle")?.replaceChildren(document.createTextNode(`Recherche de chaînes pour « ${topicQuery} »...`));
+  document.getElementById("discover-clear-results")?.classList.add("d-none");
 
   try {
-    badge.innerHTML = '<span class="status-badge pending"><i class="bi bi-search"></i> Scraping YouTube...</span> <span class="api-cost free">0 credit</span>';
-    status.innerHTML = '<span class="spinner-glass"></span> Recherche via scraping (gratuit, 0 credit API)...';
-    results.innerHTML = "";
-
-    const data = await api("/discover", {
-      method: "POST",
-      body: JSON.stringify({ topic: topicQuery }),
-    });
-
-    const methodUsed = data.method === "scraping" ? "Scraping" : "API";
+    const data = await api("/discover", { method: "POST", body: JSON.stringify({ topic: topicQuery }) });
+    const methodUsed = data.method === "scraping" ? "Scraping" : "API fallback";
     const channels = Array.isArray(data?.channels) ? data.channels : null;
-    badge.innerHTML = data.method === "scraping"
-      ? '<span class="status-badge validated"><i class="bi bi-lightning-charge"></i> Scraping</span> <span class="api-cost free">0 credit</span>'
-      : '<span class="status-badge pending"><i class="bi bi-cloud-download"></i> API fallback</span> <span class="api-cost paid">~100 credits</span>';
-
-    if (!channels) {
-      throw new Error("Réponse de découverte invalide : aucune liste de chaînes reçue");
-    }
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.found ?? channels.length} chaines trouvees pour "${escapeHtml(data.topic || topicQuery)}" (via ${methodUsed})</span>`;
-
-    if (channels.length > 0) {
-      results.innerHTML = channels
-        .map(
-          (ch) => `
-        <div class="discover-result" id="dr-${safeChannelId(ch.channelId)}">
-          <div class="dr-avatar">
-            ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="">` : '<i class="bi bi-person"></i>'}
-          </div>
-          <div class="dr-info">
-            <a href="https://youtube.com/channel/${safeChannelId(ch.channelId)}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;opacity:0.4"></i></a>
-            <div class="dr-stats">
-              <i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnes
-              <span class="status-badge pending" style="margin-left:8px">en attente</span>
-            </div>
-          </div>
-          <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
-            <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${safeChannelId(ch.channelId)}')" title="Valider" style="padding:4px 8px;font-size:0.7rem">
-              <i class="bi bi-check-lg"></i>
-            </button>
-            <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${safeChannelId(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
-              <i class="bi bi-x-lg"></i>
-            </button>
-          </div>
-        </div>`
-        )
-        .join("");
-    }
-
+    if (!channels) throw new Error("Réponse de découverte invalide : aucune liste de chaînes reçue");
+    if (badge) badge.innerHTML = data.method === "scraping"
+      ? '<span class="status-badge validated"><i class="bi bi-lightning-charge"></i> Scraping gratuit</span>'
+      : '<span class="status-badge pending"><i class="bi bi-cloud-download"></i> API fallback</span>';
+    if (status) status.innerHTML = `<span class="discover-success"><i class="bi bi-check-circle-fill"></i> ${data.found ?? channels.length} chaîne${(data.found ?? channels.length) === 1 ? "" : "s"} trouvée${(data.found ?? channels.length) === 1 ? "" : "s"} via ${methodUsed}</span>`;
+    const currentChannels = await api("/channels").catch(() => []);
+    renderDiscoveryResults(channels, currentChannels);
+    document.getElementById("discover-results-subtitle")?.replaceChildren(document.createTextNode(`${channels.length} résultat${channels.length === 1 ? "" : "s"} pour « ${topicQuery} »`));
+    document.getElementById("discover-clear-results")?.classList.toggle("d-none", channels.length === 0);
     loadStats();
     loadTopics();
     populateTopicFilter();
   } catch (err) {
-    badge.innerHTML = '<span class="status-badge rejected"><i class="bi bi-x-circle"></i> Echec</span>';
-    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${err.message}</span>`;
+    if (badge) badge.innerHTML = '<span class="status-badge rejected"><i class="bi bi-x-circle"></i> Échec</span>';
+    if (status) status.innerHTML = `<span class="discover-error"><i class="bi bi-exclamation-circle-fill"></i> ${escapeHtml(err.message)}</span>`;
+    if (results) results.innerHTML = '<div class="discover-empty-results error"><i class="bi bi-wifi-off"></i><h5>La recherche a échoué</h5><p>Vérifie la connexion puis réessaie.</p></div>';
+  } finally {
+    isDiscovering = false;
+    if (submit) { submit.disabled = false; submit.innerHTML = '<i class="bi bi-compass"></i> Explorer'; }
+    if (input) input.disabled = false;
+    document.getElementById("discover-save-topic")?.removeAttribute("disabled");
+    updateDiscoverInputState();
   }
+}
+
+function clearDiscoveryResults() {
+  if (isDiscovering) return;
+  document.getElementById("discover-results")?.replaceChildren();
+  document.getElementById("discover-results-subtitle")?.replaceChildren(document.createTextNode("Lance une recherche pour commencer ton exploration."));
+  document.getElementById("discover-clear-results")?.classList.add("d-none");
+  document.getElementById("discover-status")?.replaceChildren();
+  document.getElementById("discover-method-badge")?.replaceChildren();
 }
 
 let isScoreProgressRunning = false;
@@ -1485,15 +1591,28 @@ function escapeInlineJs(str) {
 }
 
 async function loadQuota() {
+  const valEl = document.getElementById("quota-value");
+  const barEl = document.getElementById("quota-bar");
   try {
     const quota = await api("/quota");
-    const pct = Math.min(100, Math.round((quota.used / quota.limit) * 100));
+    const used = Number(quota.used);
+    const limit = Number(quota.limit);
+    if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) {
+      if (valEl) valEl.textContent = "Indisponible";
+      if (barEl) barEl.style.width = "0%";
+      return;
+    }
+    const pct = Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
     const color = pct > 50 ? "var(--accent-red)" : pct > 20 ? "var(--accent-yellow)" : "var(--accent-green)";
-    const valEl = document.getElementById("quota-value");
-    const barEl = document.getElementById("quota-bar");
-    if (valEl) valEl.innerHTML = `${quota.used}<span style="font-size:0.7rem;opacity:0.6"> / ${quota.limit}</span>`;
-    if (barEl) { barEl.style.width = `${pct}%`; barEl.style.background = color; }
-  } catch { /* ignore */ }
+    if (valEl) valEl.innerHTML = `${formatStatCount(used)}<span style="font-size:0.7rem;opacity:0.6"> / ${formatStatCount(limit)}</span>`;
+    if (barEl) {
+      barEl.style.width = `${pct}%`;
+      barEl.style.background = color;
+    }
+  } catch {
+    if (valEl) valEl.textContent = "Indisponible";
+    if (barEl) barEl.style.width = "0%";
+  }
 }
 
 async function loadLLMHealth() {
@@ -1527,41 +1646,163 @@ const SETTINGS_KEYS = [
   "openrouter_key", "openrouter_model",
 ];
 
+let settingsLoading = false;
+
+function setSettingsSaveState(message, type = "info") {
+  const state = document.getElementById("settings-save-state");
+  if (!state) return;
+  state.className = `settings-save-state ${type}`;
+  state.innerHTML = type === "success"
+    ? `<i class="bi bi-check-circle-fill"></i> ${escapeHtml(message)}`
+    : type === "error"
+      ? `<i class="bi bi-exclamation-circle-fill"></i> ${escapeHtml(message)}`
+      : `<span class="spinner-glass spinner-glass-sm"></span> ${escapeHtml(message)}`;
+}
+
+function updateSecretState(key, configured) {
+  const input = document.getElementById(`set-${key}`);
+  const clear = input?.parentElement?.querySelector(".secret-clear");
+  const status = document.getElementById(key === "youtube_api_key" ? "youtube-key-status" : "llm-health");
+  if (!input) return;
+  input.dataset.configured = configured ? "true" : "false";
+  input.placeholder = configured ? "Clé enregistrée · saisir pour remplacer" : (key === "youtube_api_key" ? "AIza..." : "sk-or-...");
+  clear?.classList.toggle("d-none", !configured && !input.value);
+  if (key === "youtube_api_key" && status) {
+    status.className = `settings-state ${configured ? "configured" : ""}`;
+    status.innerHTML = configured
+      ? '<i class="bi bi-shield-check"></i> Configurée'
+      : '<i class="bi bi-shield-lock"></i> Non configurée';
+  }
+}
+
+function toggleSecret(id, button) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  const visible = input.type === "text";
+  input.type = visible ? "password" : "text";
+  button.innerHTML = `<i class="bi bi-eye${visible ? "" : "-slash"}"></i>`;
+}
+
+function clearSecret(id) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  input.value = "";
+  input.dataset.clear = "true";
+  input.dataset.configured = "false";
+  input.parentElement?.querySelector(".secret-clear")?.classList.add("d-none");
+  if (id === "set-youtube_api_key") updateSecretState("youtube_api_key", false);
+  setSettingsSaveState("La clé sera supprimée après l'enregistrement.", "info");
+}
+
 async function loadSettings() {
+  if (settingsLoading) return;
+  settingsLoading = true;
+  setSettingsSaveState("Chargement des réglages...", "info");
   try {
     const settings = await api("/settings");
     for (const key of SETTINGS_KEYS) {
       const el = document.getElementById(`set-${key}`);
-      if (el) el.value = settings[key] || "";
+      if (!el) continue;
+      if (el.dataset.secret === "true") {
+        el.value = "";
+        el.dataset.clear = "false";
+        updateSecretState(key, Boolean(settings[`${key}_configured`]));
+      } else {
+        el.value = settings[key] ?? "";
+      }
     }
     toggleLLMFields();
-    loadLLMHealth();
+    updateSettingsStatus(settings);
+    await loadLLMHealth();
+    setSettingsSaveState("Réglages chargés", "success");
   } catch (err) {
     console.error("[loadSettings]", err);
-    showToast("Erreur de chargement des settings", "error");
+    setSettingsSaveState("Impossible de charger les réglages", "error");
+    showToast("Erreur de chargement des réglages", "error");
+  } finally {
+    settingsLoading = false;
   }
+}
+
+function updateSettingsStatus(settings = {}) {
+  const status = document.getElementById("settings-status");
+  if (!status) return;
+  const providerLabel = { ollama: "Ollama", lmstudio: "LM Studio", openrouter: "OpenRouter" };
+  const provider = providerLabel[settings.llm_provider] || settings.llm_provider || "LLM";
+  const youtube = settings.youtube_api_key_configured
+    ? '<span class="status-ok">Configurée</span>'
+    : '<span class="status-muted">Optionnelle</span>';
+  status.innerHTML = `
+    <div class="settings-status-row"><span><i class="bi bi-robot"></i> Moteur LLM</span><strong>${escapeHtml(provider)}</strong></div>
+    <div class="settings-status-row"><span><i class="bi bi-collection-play"></i> YouTube API</span><strong>${youtube}</strong></div>
+  `;
 }
 
 function toggleLLMFields() {
-  const provider = document.getElementById("set-llm_provider")?.value;
+  const provider = document.getElementById("set-llm_provider")?.value || "ollama";
   document.getElementById("ollama-fields")?.classList.toggle("d-none", provider !== "ollama");
   document.getElementById("lmstudio-fields")?.classList.toggle("d-none", provider !== "lmstudio");
   document.getElementById("openrouter-fields")?.classList.toggle("d-none", provider !== "openrouter");
+  const hint = document.getElementById("provider-hint");
+  if (hint) {
+    hint.innerHTML = provider === "openrouter"
+      ? '<i class="bi bi-cloud"></i> Les prompts seront envoyés à OpenRouter et peuvent consommer des crédits.'
+      : '<i class="bi bi-shield-check"></i> Les données restent sur cet ordinateur.';
+  }
+}
+
+async function testLLMConnection() {
+  const button = document.getElementById("settings-test-btn");
+  if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-glass spinner-glass-sm"></span> Test...'; }
+  try {
+    const status = await api("/llm-status", { timeout: 12000 });
+    updateSettingsStatus({ llm_provider: status.provider, youtube_api_key_configured: document.getElementById("set-youtube_api_key")?.dataset.configured === "true" });
+    if (status.ok) showToast(`${status.provider || "LLM"} est disponible`, "success");
+    else showToast(status.error || "Le LLM est indisponible", "error");
+    return status;
+  } catch (err) {
+    showToast("Test impossible : " + err.message, "error");
+  } finally {
+    if (button) { button.disabled = false; button.innerHTML = '<i class="bi bi-plug"></i> Tester la connexion'; }
+  }
 }
 
 async function saveSettings() {
-  const body = {};
+  const body = { clear_secrets: [] };
   for (const key of SETTINGS_KEYS) {
     const el = document.getElementById(`set-${key}`);
-    if (el) body[key] = el.value;
+    if (!el) continue;
+    if (el.dataset.secret === "true") {
+      if (el.dataset.clear === "true") body.clear_secrets.push(key);
+      else if (el.value.trim()) body[key] = el.value.trim();
+    } else {
+      body[key] = el.value.trim();
+    }
   }
 
+  const saveButton = document.getElementById("settings-save-btn");
+  if (saveButton) { saveButton.disabled = true; saveButton.innerHTML = '<span class="spinner-glass spinner-glass-sm"></span> Enregistrement...'; }
+  setSettingsSaveState("Enregistrement...", "info");
   try {
-    await api("/settings", { method: "POST", body: JSON.stringify(body) });
-    showToast("Settings sauvegardees", "success");
-    loadLLMHealth();
+    const result = await api("/settings", { method: "POST", body: JSON.stringify(body) });
+    for (const key of ["youtube_api_key", "openrouter_key"]) {
+      const input = document.getElementById(`set-${key}`);
+      if (input) {
+        input.value = "";
+        input.dataset.clear = "false";
+        updateSecretState(key, Boolean(result.settings?.[`${key}_configured`]));
+      }
+    }
+    updateSettingsStatus(result.settings);
+    toggleLLMFields();
+    await loadLLMHealth();
+    setSettingsSaveState("Réglages enregistrés", "success");
+    showToast("Réglages enregistrés", "success");
   } catch (err) {
-    showToast("Erreur: " + err.message, "error");
+    setSettingsSaveState("Échec de l'enregistrement", "error");
+    showToast("Erreur : " + err.message, "error");
+  } finally {
+    if (saveButton) { saveButton.disabled = false; saveButton.innerHTML = '<i class="bi bi-check-lg"></i> Enregistrer'; }
   }
 }
 

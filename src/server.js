@@ -14,6 +14,26 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
+const SETTINGS_KEYS = new Set([
+  "youtube_api_key", "llm_provider",
+  "ollama_url", "ollama_model",
+  "lmstudio_url", "lmstudio_model",
+  "openrouter_key", "openrouter_model",
+]);
+const SECRET_SETTINGS = new Set(["youtube_api_key", "openrouter_key"]);
+
+function getPublicSettings() {
+  const settings = getAllSettings();
+  const publicSettings = {};
+  for (const key of SETTINGS_KEYS) {
+    if (!SECRET_SETTINGS.has(key)) publicSettings[key] = settings[key];
+  }
+  for (const key of SECRET_SETTINGS) {
+    publicSettings[`${key}_configured`] = Boolean(settings[key]);
+  }
+  return publicSettings;
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -581,18 +601,26 @@ const server = Bun.serve({
     },
 
     "/api/settings": {
-      GET: () => {
-        const settings = getAllSettings();
-        return json(settings);
-      },
+      GET: () => json(getPublicSettings()),
       POST: async (req) => {
         const body = await readBody(req);
-        for (const [key, value] of Object.entries(body)) {
-          if (typeof value === "string") {
-            setSetting(key, value);
-          }
+        const provider = typeof body.llm_provider === "string" ? body.llm_provider.trim() : null;
+        if (provider && !["ollama", "lmstudio", "openrouter"].includes(provider)) {
+          return json({ error: "Unknown LLM provider" }, 400);
         }
-        return json({ ok: true, settings: getAllSettings() });
+
+        const clearSecrets = Array.isArray(body.clear_secrets) ? body.clear_secrets : [];
+        for (const [key, value] of Object.entries(body)) {
+          if (!SETTINGS_KEYS.has(key) || key === "clear_secrets" || typeof value !== "string") continue;
+          const trimmed = value.trim();
+          // Empty secret fields preserve the stored value unless explicitly cleared.
+          if (SECRET_SETTINGS.has(key) && !trimmed && !clearSecrets.includes(key)) continue;
+          setSetting(key, trimmed);
+        }
+        for (const key of clearSecrets) {
+          if (SECRET_SETTINGS.has(key)) setSetting(key, "");
+        }
+        return json({ ok: true, settings: getPublicSettings() });
       },
     },
   },
