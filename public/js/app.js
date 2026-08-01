@@ -188,11 +188,18 @@ async function loadStats() {
 
 function renderVideoCard(v, seenSet) {
   const seenClass = seenSet.has(v.url) ? "seen" : "";
+  const thumbnailUrl = safeImageUrl(v.thumbnail);
+  const fallbackThumbnailUrl = safeYoutubeThumbnailUrl(v.url);
+  const thumbnail = thumbnailUrl
+    ? `<img src="${thumbnailUrl}" alt="" loading="lazy"${fallbackThumbnailUrl ? ` onerror="this.onerror=null;this.src='${fallbackThumbnailUrl}'"` : ""}>`
+    : fallbackThumbnailUrl
+      ? `<img src="${fallbackThumbnailUrl}" alt="" loading="lazy">`
+      : "";
   return `
     <div class="col-sm-6 col-md-4 col-xl-3">
       <div class="video-card h-100 ${seenClass}" data-video-url="${escapeHtml(v.url)}" onclick="playVideo('${escapeInlineJs(v.url)}')" title="${seenClass ? 'Déjà vu' : ''}">
         <div class="thumb-wrap">
-            ${v.thumbnail ? `<img src="${v.thumbnail}" alt="" loading="lazy">` : ""}
+            ${thumbnail}
             <div class="play-overlay" aria-hidden="true"><i class="bi bi-play-circle-fill"></i></div>
             ${seenClass ? `<span class="seen-badge"><i class="bi bi-check-circle-fill"></i> Vu</span>` : ""}
             <span class="views-badge"><i class="bi bi-eye"></i> ${formatNumber(v.vues)}</span>
@@ -438,7 +445,7 @@ function renderChannels(searchQuery) {
       (ch) => `
       <div class="channel-card mb-3" id="ch-${ch.id}">
         <div class="ch-avatar" style="cursor:pointer" onclick="openChannelDetail(${ch.id})">
-          ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : escapeHtml(ch.nom.charAt(0).toUpperCase())}
+          ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="">` : escapeHtml(ch.nom.charAt(0).toUpperCase())}
         </div>
         <div class="ch-info">
           <div class="d-flex align-items-center gap-2">
@@ -454,7 +461,7 @@ function renderChannels(searchQuery) {
           ${ch.raison_rejet ? `<div class="mt-1" style="font-size:0.78rem;color:var(--accent-red)"><i class="bi bi-x-circle"></i> ${escapeHtml(ch.raison_rejet)}</div>` : ""}
           <div class="d-flex align-items-center gap-2 mt-2" style="flex-wrap:wrap">
             <div id="ch-topics-${ch.id}"></div>
-            ${ch.status === "pending" ? `<button class="btn btn-sm-glass btn-sm ms-auto" onclick="scoreSingle('${ch.channel_id}', ${ch.id})" title="Score LLM"><i class="bi bi-stars"></i> Score</button>` : ""}
+            ${ch.status === "pending" ? `<button class="btn btn-sm-glass btn-sm ms-auto" onclick="scoreSingle('${safeChannelId(ch.channel_id)}', ${ch.id})" title="Score LLM"><i class="bi bi-stars"></i> Score</button>` : ""}
           </div>
           ${ch.status === "pending" ? `<div class="mt-2" id="ch-preview-${ch.id}"><div class="spinner-glass"></div></div>` : ""}
         </div>
@@ -486,7 +493,7 @@ function renderChannels(searchQuery) {
                 : ""
           }
           <div class="ch-actions-row">
-            <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${ch.channel_id}','_blank')" title="Voir sur YouTube">
+            <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}','_blank')" title="Voir sur YouTube">
               <i class="bi bi-youtube"></i> Voir
             </button>
           </div>
@@ -607,32 +614,36 @@ async function runDiscovery() {
     });
 
     const methodUsed = data.method === "scraping" ? "Scraping" : "API";
+    const channels = Array.isArray(data?.channels) ? data.channels : null;
     badge.innerHTML = data.method === "scraping"
       ? '<span class="status-badge validated"><i class="bi bi-lightning-charge"></i> Scraping</span> <span class="api-cost free">0 credit</span>'
       : '<span class="status-badge pending"><i class="bi bi-cloud-download"></i> API fallback</span> <span class="api-cost paid">~100 credits</span>';
 
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.found} chaines trouvees pour "${data.topic}" (via ${methodUsed})</span>`;
+    if (!channels) {
+      throw new Error("Réponse de découverte invalide : aucune liste de chaînes reçue");
+    }
+    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.found ?? channels.length} chaines trouvees pour "${escapeHtml(data.topic || topicQuery)}" (via ${methodUsed})</span>`;
 
-    if (data.channels && data.channels.length > 0) {
-      results.innerHTML = data.channels
+    if (channels.length > 0) {
+      results.innerHTML = channels
         .map(
           (ch) => `
-        <div class="discover-result" id="dr-${ch.channelId}">
+        <div class="discover-result" id="dr-${safeChannelId(ch.channelId)}">
           <div class="dr-avatar">
-            ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : '<i class="bi bi-person"></i>'}
+            ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="">` : '<i class="bi bi-person"></i>'}
           </div>
           <div class="dr-info">
-            <a href="https://youtube.com/channel/${ch.channelId}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;opacity:0.4"></i></a>
+            <a href="https://youtube.com/channel/${safeChannelId(ch.channelId)}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;opacity:0.4"></i></a>
             <div class="dr-stats">
               <i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnes
               <span class="status-badge pending" style="margin-left:8px">en attente</span>
             </div>
           </div>
           <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
-            <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${escapeInlineJs(ch.channelId)}')" title="Valider" style="padding:4px 8px;font-size:0.7rem">
+            <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${safeChannelId(ch.channelId)}')" title="Valider" style="padding:4px 8px;font-size:0.7rem">
               <i class="bi bi-check-lg"></i>
             </button>
-            <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
+            <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${safeChannelId(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
               <i class="bi bi-x-lg"></i>
             </button>
           </div>
@@ -650,46 +661,111 @@ async function runDiscovery() {
   }
 }
 
-async function scoreAll() {
-  const status = document.getElementById("score-status");
-  status.innerHTML = '<span class="spinner-glass"></span> Scoring en cours... (peut prendre un moment)';
+let isScoreProgressRunning = false;
 
-  try {
-    const data = await api("/score-all", { method: "POST" });
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.scored} chaines scorees</span>`;
-    loadChannels();
-    loadStats();
-  } catch (err) {
-    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${err.message}</span>`;
+function updateScoreProgress(data, labelText) {
+  const progress = document.getElementById("score-progress");
+  const label = document.getElementById("score-progress-label");
+  const count = document.getElementById("score-progress-count");
+  const bar = document.getElementById("score-progress-bar");
+  const detail = document.getElementById("score-progress-detail");
+  const track = progress?.querySelector(".score-progress-track");
+  if (!progress || !label || !count || !bar || !detail) return;
+
+  const total = Number(data?.total) || 0;
+  const completed = Math.min(Number(data?.completed) || 0, total || Number(data?.completed) || 0);
+  const percent = total > 0 ? Math.round((completed / total) * 100) : data?.status === "done" ? 100 : 0;
+  progress.classList.remove("d-none");
+  count.textContent = total > 0 ? `${completed} / ${total}` : "Préparation...";
+  bar.style.width = `${percent}%`;
+  track?.setAttribute("aria-valuenow", String(percent));
+
+  if (data?.status === "done") {
+    label.innerHTML = '<i class="bi bi-check-circle-fill"></i> Scoring terminé';
+    detail.textContent = `${data.scored || 0} chaîne${data.scored === 1 ? "" : "s"} scorée${data.scored === 1 ? "" : "s"}${data.failed ? ` · ${data.failed} échec${data.failed === 1 ? "" : "s"}` : ""}`;
+    bar.classList.remove("progress-bar-animated");
+  } else if (data?.status === "error") {
+    label.innerHTML = '<i class="bi bi-exclamation-circle-fill"></i> Scoring interrompu';
+    detail.textContent = data.error || "Une erreur est survenue pendant le scoring.";
+    bar.classList.remove("progress-bar-animated");
+  } else {
+    label.innerHTML = `<i class="bi bi-stars"></i> ${escapeHtml(labelText || "Scoring en cours...")}`;
+    detail.textContent = data?.current
+      ? `Analyse de ${data.current} · ${data.scored || 0} résultat${data.scored === 1 ? "" : "s"} reçu${data.scored === 1 ? "" : "s"}`
+      : "Les chaînes sont traitées en parallèle par le LLM...";
+    bar.classList.add("progress-bar-animated");
   }
 }
 
-async function scoreAllUnscored() {
+async function runScoreJob(endpoint, labelText, successText) {
+  if (isScoreProgressRunning) {
+    showToast("Un scoring est déjà en cours...", "info");
+    return;
+  }
+  isScoreProgressRunning = true;
+
   const status = document.getElementById("score-status");
-  status.innerHTML = '<span class="spinner-glass"></span> Scoring des chaines non-scorees...';
+  const buttons = document.querySelectorAll("#page-discover button[onclick^=\"score\"], #page-discover button[onclick^=\"rescore\"]");
+  buttons.forEach((button) => { button.disabled = true; });
+  status.innerHTML = `<span class="spinner-glass"></span> ${escapeHtml(labelText)}`;
+  updateScoreProgress({ status: "running", total: 0, completed: 0, scored: 0 }, labelText);
+
+  let jobId = "";
+  let lastStatus = null;
+  let failures = 0;
+  const deadline = Date.now() + 2 * 60 * 60 * 1000;
 
   try {
-    const data = await api("/score-unscored", { method: "POST", timeout: 300000 });
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.scored} chaines scorees</span>`;
-    loadChannels();
-    loadStats();
+    const started = await api(endpoint, { method: "POST", timeout: 30000 });
+    jobId = started.jobId || "";
+    if (!jobId) throw new Error("Impossible d'identifier le scoring");
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      let data;
+      try {
+        data = await api(`/score-status?job=${encodeURIComponent(jobId)}`, { timeout: 30000 });
+        failures = 0;
+      } catch (err) {
+        failures++;
+        if (failures >= 10) throw err;
+        status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${failures}/10)</span>`;
+        continue;
+      }
+      lastStatus = data;
+      updateScoreProgress(data, labelText);
+
+      if (data.status === "done") {
+        status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}</span>`;
+        loadChannels();
+        loadStats();
+        return;
+      }
+      if (data.status === "error") {
+        throw new Error(data.error || "Erreur pendant le scoring");
+      }
+    }
+
+    throw new Error("Le suivi a expiré après deux heures, mais le scoring peut continuer sur le serveur.");
   } catch (err) {
-    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${err.message}</span>`;
+    updateScoreProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, scored: 0 }, labelText);
+    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    isScoreProgressRunning = false;
+    buttons.forEach((button) => { button.disabled = false; });
   }
 }
 
-async function rescoreAll() {
-  const status = document.getElementById("score-status");
-  status.innerHTML = '<span class="spinner-glass"></span> Rescore de toutes les chaines... (peut prendre beaucoup de temps)';
+function scoreAll() {
+  return runScoreJob("/score-all", "Scoring des chaînes en attente...", "Chaînes scorées");
+}
 
-  try {
-    const data = await api("/rescore-all", { method: "POST", timeout: 600000 });
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.scored} chaines rescorees</span>`;
-    loadChannels();
-    loadStats();
-  } catch (err) {
-    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${err.message}</span>`;
-  }
+function scoreAllUnscored() {
+  return runScoreJob("/score-unscored", "Scoring des chaînes non scorées...", "Chaînes scorées");
+}
+
+function rescoreAll() {
+  return runScoreJob("/rescore-all", "Rescore de toutes les chaînes...", "Chaînes rescorrées");
 }
 
 async function scoreSingle(channelId, elemId) {
@@ -838,7 +914,7 @@ async function previewChannel() {
 
       let html = `
         <div class="glass-card p-3 d-flex align-items-center gap-3">
-          <img src="${data.thumbnail || ""}" alt="" class="rounded-circle" 
+          <img src="${safeImageUrl(data.thumbnail)}" alt="" class="rounded-circle"
                style="width:48px;height:48px;object-fit:cover;background:var(--purple-800)"
                onerror="this.style.display='none'">
           <div class="flex-grow-1">
@@ -947,9 +1023,10 @@ async function refreshRSS() {
 
   // Poll status until done
   let done = false;
-  while (!done) {
+  let status = null;
+  const pollDeadline = Date.now() + 30 * 60 * 1000;
+  while (!done && Date.now() < pollDeadline) {
     await new Promise((r) => setTimeout(r, 1500));
-    let status;
     try {
       status = await api("/refresh/status");
     } catch { continue; }
@@ -967,11 +1044,23 @@ async function refreshRSS() {
     }
   }
 
-  // Done
-  bar.classList.remove("progress-bar-striped", "progress-bar-animated");
-  bar.style.width = "100%";
-  count.textContent = `✓ ${status.completed} chaines`;
-  detail.textContent = status.errors > 0 ? `${status.errors} erreurs` : "";
+  // Done (or timed out while the server continued in the background)
+  if (!status || status.status === "running") {
+    detail.textContent = status
+      ? "Refresh toujours en cours — suivi en arrière-plan"
+      : "Connexion interrompue — suivi en arrière-plan";
+    watchRefreshInBackground({ btn, icon, banner, bar, count, detail });
+    return;
+  }
+
+  if (status) {
+    bar.classList.remove("progress-bar-striped", "progress-bar-animated");
+    bar.style.width = status.status === "done" || status.total === 0 ? "100%" : `${Math.min(100, Math.round((status.completed / status.total) * 100))}%`;
+    count.textContent = status.status === "done" ? `✓ ${status.completed} chaines` : "Refresh en erreur";
+    detail.textContent = status.errors > 0 ? `${status.errors} erreurs` : "";
+  } else {
+    detail.textContent = "Impossible de lire la progression";
+  }
   setTimeout(() => {
     banner.classList.add("d-none");
     bar.classList.add("progress-bar-striped", "progress-bar-animated");
@@ -980,6 +1069,51 @@ async function refreshRSS() {
 
   loadVideos(true);
   loadStats();
+  icon?.classList.remove("spinning");
+  btn?.removeAttribute("disabled");
+  btn?.removeAttribute("aria-busy");
+}
+
+async function watchRefreshInBackground({ btn, icon, banner, bar, count, detail }) {
+  const watcherDeadline = Date.now() + 2 * 60 * 60 * 1000;
+  while (Date.now() < watcherDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    let status;
+    try {
+      status = await api("/refresh/status");
+    } catch {
+      continue;
+    }
+
+    const pct = status.total > 0 ? Math.round((status.completed / status.total) * 100) : 0;
+    count.textContent = `${status.completed} / ${status.total}`;
+    bar.style.width = `${pct}%`;
+    detail.textContent = status.current || "Refresh toujours en cours";
+    if (status.status !== "done" && status.status !== "error") continue;
+
+    bar.classList.remove("progress-bar-striped", "progress-bar-animated");
+    bar.style.width = "100%";
+    count.textContent = status.status === "done" ? `✓ ${status.completed} chaines` : "Refresh en erreur";
+    detail.textContent = status.errors > 0 ? `${status.errors} erreurs` : "";
+    setTimeout(() => {
+      banner.classList.add("d-none");
+      bar.classList.add("progress-bar-striped", "progress-bar-animated");
+      bar.style.width = "0%";
+    }, 3000);
+    loadVideos(true);
+    loadStats();
+    icon?.classList.remove("spinning");
+    btn?.removeAttribute("disabled");
+    btn?.removeAttribute("aria-busy");
+    return;
+  }
+
+  detail.textContent = "Suivi interrompu — vérifie le statut du refresh plus tard";
+  setTimeout(() => {
+    banner.classList.add("d-none");
+    bar.classList.add("progress-bar-striped", "progress-bar-animated");
+    bar.style.width = "0%";
+  }, 5000);
   icon?.classList.remove("spinning");
   btn?.removeAttribute("disabled");
   btn?.removeAttribute("aria-busy");
@@ -1155,6 +1289,26 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function safeImageUrl(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return escapeHtml(url.href);
+  } catch {
+    return "";
+  }
+}
+
+function safeYoutubeThumbnailUrl(videoUrl) {
+  const videoId = extractVideoId(videoUrl);
+  return videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "";
+}
+
+function safeChannelId(value) {
+  return /^[A-Za-z0-9_-]{1,64}$/.test(String(value || "")) ? String(value) : "";
 }
 
 function getSeenVideos() {
@@ -1476,6 +1630,64 @@ function loadRelatedPage() {
   }
 }
 
+function renderRelatedChannel(ch) {
+  const channelId = safeChannelId(ch.channelId);
+  return `
+    <div class="discover-result related-result-enter" id="rel-${channelId}">
+      <div class="dr-avatar">
+        ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="">` : '<i class="bi bi-person"></i>'}
+      </div>
+      <div class="dr-info">
+        <a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener" class="dr-name" style="text-decoration:none;color:inherit">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;opacity:0.4"></i></a>
+        <div class="dr-stats">
+          <i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnes
+          <span class="status-badge pending" style="margin-left:8px">en attente</span>
+          <span class="text-muted" style="margin-left:6px;font-size:0.75rem"><i class="bi bi-diagram-2"></i> via ${escapeHtml(ch.source_channel || "")}</span>
+        </div>
+      </div>
+      <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
+        <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();quickValidate('${channelId}', this)" title="Valider" style="padding:4px 8px;font-size:0.7rem">
+          <i class="bi bi-check-lg"></i>
+        </button>
+        <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();quickReject('${channelId}', '${escapeInlineJs(ch.nom)}', this)" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </div>`;
+}
+
+function updateRelatedProgress(data) {
+  const progress = document.getElementById("related-progress");
+  const label = document.getElementById("related-progress-label");
+  const count = document.getElementById("related-progress-count");
+  const bar = document.getElementById("related-progress-bar");
+  const detail = document.getElementById("related-progress-detail");
+  const track = progress?.querySelector(".related-progress-track");
+  if (!progress || !label || !count || !bar || !detail) return;
+
+  const total = Number(data.total) || 0;
+  const completed = Math.min(Number(data.completed) || 0, total || Number(data.completed) || 0);
+  const percent = total > 0 ? Math.round((completed / total) * 100) : data.status === "done" ? 100 : 0;
+  progress.classList.remove("d-none");
+  count.textContent = total > 0 ? `${completed} / ${total}` : "Préparation...";
+  bar.style.width = `${percent}%`;
+  track?.setAttribute("aria-valuenow", String(percent));
+
+  if (data.status === "done") {
+    label.innerHTML = '<i class="bi bi-check-circle-fill"></i> Exploration terminée';
+    detail.textContent = `${data.found || 0} chaîne${data.found === 1 ? "" : "s"} similaire${data.found === 1 ? "" : "s"} trouvée${data.found === 1 ? "" : "s"}`;
+    bar.classList.remove("progress-bar-animated");
+  } else if (data.status === "error") {
+    label.innerHTML = '<i class="bi bi-exclamation-circle-fill"></i> Exploration interrompue';
+    detail.textContent = data.error || "Une erreur est survenue pendant l'exploration.";
+    bar.classList.remove("progress-bar-animated");
+  } else {
+    label.innerHTML = `<i class="bi bi-search"></i> Analyse de ${escapeHtml(data.current || "tes chaînes validées")}...`;
+    detail.textContent = `${data.found || 0} chaîne${data.found === 1 ? "" : "s"} trouvée${data.found === 1 ? "" : "s"} pour l'instant — les résultats arrivent en direct`;
+    bar.classList.add("progress-bar-animated");
+  }
+}
+
 async function runRelatedDiscovery() {
   if (isRelatedRunning) return showToast("Deja en cours...", "info");
   isRelatedRunning = true;
@@ -1490,48 +1702,57 @@ async function runRelatedDiscovery() {
   status.innerHTML = "";
   results.innerHTML = "";
   badge.style.display = "inline-flex";
+  document.getElementById("related-progress")?.classList.remove("d-none");
+  updateRelatedProgress({ status: "running", total: 0, completed: 0, found: 0 });
+
+  let cursor = 0;
+  let lastStatus = null;
+  let jobId = "";
+  let pollFailures = 0;
+  const pollingDeadline = Date.now() + 2 * 60 * 60 * 1000;
 
   try {
-    const data = await api("/discover/related", {
-      method: "POST",
-      timeout: 300000,
-    });
+    const started = await api("/discover/related", { method: "POST", timeout: 30000 });
+    jobId = started.jobId || "";
+    if (!jobId) throw new Error("Impossible d'identifier l'exploration");
 
-    if (data.found === 0) {
-      status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
-      return;
+    while (Date.now() < pollingDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      let data;
+      try {
+        data = await api(`/discover/related/status?job=${encodeURIComponent(jobId)}&since=${cursor}`, { timeout: 30000 });
+        pollFailures = 0;
+      } catch (err) {
+        pollFailures++;
+        if (pollFailures >= 10) throw err;
+        status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${pollFailures}/10)</span>`;
+        continue;
+      }
+      lastStatus = data;
+      updateRelatedProgress(data);
+
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
+        cursor = data.next;
+        status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+      }
+
+      if (data.status === "done") {
+        if (!data.found) {
+          status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
+        }
+        loadStats();
+        return;
+      }
+      if (data.status === "error") {
+        throw new Error(data.error || "Erreur pendant la découverte");
+      }
     }
 
-    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${data.found} chaines francaises trouvees</span>`;
-
-    results.innerHTML = data.channels.map((ch) => `
-      <div class="discover-result" id="rel-${ch.channelId}">
-        <div class="dr-avatar">
-          ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : '<i class="bi bi-person"></i>'}
-        </div>
-        <div class="dr-info">
-          <a href="https://youtube.com/channel/${ch.channelId}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.65rem;opacity:0.4"></i></a>
-          <div class="dr-stats">
-            <i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnes
-            <span class="status-badge pending" style="margin-left:8px">en attente</span>
-            <span class="text-muted" style="margin-left:6px;font-size:0.75rem"><i class="bi bi-diagram-2"></i> via ${escapeHtml(ch.source_channel || "")}</span>
-          </div>
-        </div>
-        <div class="dr-actions" style="display:flex;gap:4px;flex-shrink:0">
-          <button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();quickValidate('${escapeInlineJs(ch.channelId)}', this)" title="Valider" style="padding:4px 8px;font-size:0.7rem">
-            <i class="bi bi-check-lg"></i>
-          </button>
-          <button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();quickReject('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}', this)" title="Rejeter" style="padding:4px 8px;font-size:0.7rem">
-            <i class="bi bi-x-lg"></i>
-          </button>
-        </div>
-      </div>
-    `).join("");
-
-    // Re-fetch stats after adding channels
-    loadStats();
+    throw new Error("Le suivi a expiré après deux heures, mais la découverte peut continuer sur le serveur.");
   } catch (err) {
-    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${err.message}</span>`;
+    updateRelatedProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, found: cursor });
+    status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> ${escapeHtml(err.message)}</span>`;
   } finally {
     isRelatedRunning = false;
     btn.disabled = false;
@@ -1589,7 +1810,7 @@ async function openChannelDetail(id) {
     document.getElementById("detail-ch-thumb").src = ch.thumbnail || "";
     document.getElementById("detail-ch-name").textContent = ch.nom;
     document.getElementById("detail-ch-meta").textContent = `${formatNumber(ch.subscriber_count)} abonnes | ${ch.status}`;
-    document.getElementById("detail-ch-link").href = `https://youtube.com/channel/${ch.channel_id}`;
+    document.getElementById("detail-ch-link").href = `https://youtube.com/channel/${safeChannelId(ch.channel_id)}`;
 
     if (ch.llm_summary) {
       document.getElementById("detail-ch-summary").innerHTML = `
@@ -1631,13 +1852,13 @@ async function loadRelatedChannels(channelId) {
     container.innerHTML = related.map((ch) => `
       <div class="discover-result" style="padding:10px;margin-bottom:8px">
         <div class="dr-avatar" style="width:36px;height:36px">
-          ${ch.thumbnail ? `<img src="${ch.thumbnail}" alt="">` : '<i class="bi bi-person"></i>'}
+          ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="">` : '<i class="bi bi-person"></i>'}
         </div>
         <div class="dr-info">
-          <a href="https://youtube.com/channel/${ch.channelId}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit;font-size:0.88rem">${escapeHtml(ch.nom)}</a>
+          <a href="https://youtube.com/channel/${safeChannelId(ch.channelId)}" target="_blank" class="dr-name" style="text-decoration:none;color:inherit;font-size:0.88rem">${escapeHtml(ch.nom)}</a>
         </div>
         <div class="dr-actions">
-          <button class="btn btn-sm-glass" onclick="event.stopPropagation();addRelatedChannel('${escapeInlineJs(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Ajouter" style="padding:3px 8px;font-size:0.7rem">
+          <button class="btn btn-sm-glass" onclick="event.stopPropagation();addRelatedChannel('${safeChannelId(ch.channelId)}', '${escapeInlineJs(ch.nom)}')" title="Ajouter" style="padding:3px 8px;font-size:0.7rem">
             <i class="bi bi-plus-lg"></i>
           </button>
         </div>
@@ -1672,7 +1893,7 @@ function renderChannelPreview(channelId, videos) {
   }
   container.innerHTML = `<div class="preview-thumbs">${videos.map((v) => `
     <div class="preview-thumb" onclick="playVideo('${escapeInlineJs(v.url)}')" title="${escapeHtml(v.titre)}">
-      ${v.thumbnail ? `<img src="${v.thumbnail}" alt="">` : ""}
+      ${v.thumbnail ? `<img src="${safeImageUrl(v.thumbnail)}" alt="">` : ""}
       <span class="preview-views">${formatNumber(v.vues)}</span>
     </div>
   `).join("")}</div>`;

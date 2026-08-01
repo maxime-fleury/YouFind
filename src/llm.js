@@ -266,42 +266,49 @@ export async function scoreChannel(channelId) {
   }
 }
 
-export async function scoreAllPending() {
+async function scoreChannelList(channels, onProgress) {
+  const results = [];
+  let completed = 0;
+  let failed = 0;
+  onProgress?.({ total: channels.length, completed: 0, scored: 0, failed: 0, current: "" });
+
+  await runWithLimit(
+    channels,
+    async (ch) => {
+      const result = await scoreChannel(ch.channel_id);
+      if (result) results.push({ channel: ch.nom, ...result });
+      else failed++;
+      completed++;
+      onProgress?.({
+        total: channels.length,
+        completed,
+        scored: results.length,
+        failed,
+        current: ch.nom,
+      });
+    },
+    3,
+    1000
+  );
+  return results;
+}
+
+export async function scoreAllPending(onProgress) {
   const pending = stmts.getPendingChannels.all();
   console.log(`[LLM] Scoring ${pending.length} pending channels...`);
-  const results = [];
-  await runWithLimit(
-    pending,
-    async (ch) => {
-      const result = await scoreChannel(ch.channel_id);
-      if (result) results.push({ channel: ch.nom, ...result });
-    },
-    3,
-    1000
-  );
-  return results;
+  return scoreChannelList(pending, onProgress);
 }
 
-export async function scoreAllUnscored() {
+export async function scoreAllUnscored(onProgress) {
   const unscored = stmts.getUnscoredChannels.all();
   console.log(`[LLM] Scoring ${unscored.length} unscored channels...`);
-  const results = [];
-  await runWithLimit(
-    unscored,
-    async (ch) => {
-      const result = await scoreChannel(ch.channel_id);
-      if (result) results.push({ channel: ch.nom, ...result });
-    },
-    3,
-    1000
-  );
-  return results;
+  return scoreChannelList(unscored, onProgress);
 }
 
-export async function rescoreAllChannels() {
+export async function rescoreAllChannels(onProgress) {
   stmts.resetAllScores.run();
   console.log("[LLM] All scores reset. Rescoring everything...");
-  return scoreAllUnscored();
+  return scoreAllUnscored(onProgress);
 }
 
 export async function checkLLMHealth() {

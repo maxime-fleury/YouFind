@@ -83,11 +83,18 @@ function parseEntries(xml) {
 // Scrape duration from video page (FREE, no API)
 const durationCache = new Map();
 const DURATION_CACHE_MAX = 5000;
+let activeRefreshPromise = null;
 export async function scrapeVideoDuration(videoUrl) {
   // Extract video ID from URL
   const vId = videoUrl.match(/v=([\w-]+)/)?.[1];
   if (!vId) return 0;
-  if (durationCache.has(vId)) return durationCache.get(vId);
+  if (durationCache.has(vId)) {
+    const cached = durationCache.get(vId);
+    // Refresh insertion order so frequently-used durations stay hot.
+    durationCache.delete(vId);
+    durationCache.set(vId, cached);
+    return cached;
+  }
 
   try {
     const res = await fetch(`https://www.youtube.com/watch?v=${vId}`, {
@@ -99,7 +106,10 @@ export async function scrapeVideoDuration(videoUrl) {
     // Extract lengthSeconds from ytInitialPlayerResponse JSON
     const match = html.match(/"lengthSeconds"\s*:\s*"?(\d+)"?/);
     const sec = parseInt(match?.[1]) || 0;
-    if (durationCache.size >= DURATION_CACHE_MAX) durationCache.clear();
+    if (durationCache.size >= DURATION_CACHE_MAX) {
+      const oldest = durationCache.keys().next().value;
+      if (oldest) durationCache.delete(oldest);
+    }
     durationCache.set(vId, sec);
     return sec;
   } catch {
@@ -193,7 +203,7 @@ export async function ingestChannel(channelId) {
   return { total: entries.length, added, durUpdated, source };
 }
 
-export async function refreshAllChannels(onProgress) {
+async function refreshAllChannelsImpl(onProgress) {
   const channels = stmts.getChannelsByStatus.all("validated");
   const results = [];
   const total = channels.length;
@@ -218,6 +228,15 @@ export async function refreshAllChannels(onProgress) {
 
   console.log(`[RSS] Refreshed ${channels.length} channels.`);
   return results;
+}
+
+export function refreshAllChannels(onProgress) {
+  if (activeRefreshPromise) return activeRefreshPromise;
+
+  activeRefreshPromise = refreshAllChannelsImpl(onProgress).finally(() => {
+    activeRefreshPromise = null;
+  });
+  return activeRefreshPromise;
 }
 
 export async function getChannelVideoSummaries(channelId, count = 5) {

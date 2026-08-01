@@ -66,7 +66,35 @@ function serveStatic(pathname) {
 
 let isRefreshingRSS = false;
 let isRefreshingStats = false;
+let isScoring = false;
+let scoringJobId = null;
+const scoringProgress = {
+  jobId: null,
+  mode: "",
+  total: 0,
+  completed: 0,
+  scored: 0,
+  failed: 0,
+  current: "",
+  status: "idle",
+  error: "",
+};
+let isRelatedRunning = false;
+let relatedJobId = null;
 const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
+const relatedProgress = {
+  total: 0,
+  completed: 0,
+  found: 0,
+  current: "",
+  status: "idle",
+  results: [],
+  error: "",
+};
+
+function createJobId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // Simple in-memory rate limiter: 120 requests per minute per IP
 const RATE_LIMIT = 120;
@@ -96,6 +124,71 @@ function checkRateLimit(req) {
   return true;
 }
 
+async function runScoringJob(job) {
+  if (isScoring) {
+    return json({ error: "A scoring job is already in progress" }, 409);
+  }
+  isScoring = true;
+  try {
+    return await job();
+  } finally {
+    isScoring = false;
+  }
+}
+
+function startScoringJob(mode, scorer) {
+  if (isScoring) return null;
+
+  isScoring = true;
+  scoringJobId = createJobId();
+  scoringProgress.jobId = scoringJobId;
+  scoringProgress.mode = mode;
+  scoringProgress.total = 0;
+  scoringProgress.completed = 0;
+  scoringProgress.scored = 0;
+  scoringProgress.failed = 0;
+  scoringProgress.current = "";
+  scoringProgress.status = "running";
+  scoringProgress.error = "";
+
+  Promise.resolve()
+    .then(() => scorer((progress) => {
+      scoringProgress.total = progress.total;
+      scoringProgress.completed = progress.completed;
+      scoringProgress.scored = progress.scored;
+      scoringProgress.failed = progress.failed;
+      scoringProgress.current = progress.current || "";
+    }))
+    .then((results) => {
+      scoringProgress.status = "done";
+      scoringProgress.total = Math.max(scoringProgress.total, scoringProgress.completed);
+      scoringProgress.completed = scoringProgress.total;
+      scoringProgress.scored = results.length;
+    })
+    .catch((err) => {
+      scoringProgress.status = "error";
+      scoringProgress.error = err.message;
+      console.error(`[LLM] ${mode} scoring error:`, err.message);
+    })
+    .finally(() => {
+      isScoring = false;
+    });
+
+  return scoringJobId;
+}
+
+function parsePositiveId(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function isYoutubeChannelId(value) {
+  return typeof value === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(value.trim());
+}
+
 const server = Bun.serve({
   port: PORT,
   hostname: HOST,
@@ -108,13 +201,21 @@ const server = Bun.serve({
     "/api/videos": {
       GET: (req) => {
         const url = new URL(req.url);
-        const limit = parseInt(url.searchParams.get("limit") || "60");
-        const offset = parseInt(url.searchParams.get("offset") || "0");
+        const requestedLimit = Number(url.searchParams.get("limit") || "60");
+        const offset = Number(url.searchParams.get("offset") || "0");
+        if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || !Number.isInteger(offset) || offset < 0) {
+          return json({ error: "limit must be >= 1 and offset must be >= 0" }, 400);
+        }
+        const limit = Math.min(requestedLimit, 100);
         const channel = url.searchParams.get("channel");
         const topic = url.searchParams.get("topic");
         const search = url.searchParams.get("q")?.trim() || "";
         // Build a safe prefix-match FTS5 query: term1* AND term2*
-        const rawTerms = search.replace(/['"]/g, "").split(/\s+/).filter((t) => t.length > 0).map((t) => t.replace(/[^\w\-]/g, ""));
+        const rawTerms = search
+          .replace(/['"]/g, "")
+          .split(/\s+/)
+          .map((term) => term.replace(/[^\w\-]/g, ""))
+          .filter((term) => term.length > 0);
         const hasSearch = rawTerms.length > 0;
         const sort = url.searchParams.get("sort") || (hasSearch ? "relevance" : "newest");
 
@@ -123,7 +224,7 @@ const server = Bun.serve({
           views: "v.vues DESC",
           engagement: "CASE WHEN c.subscriber_count > 0 THEN CAST(v.vues AS REAL) / c.subscriber_count ELSE 0 END DESC",
           score: "c.llm_score DESC NULLS LAST",
-          relevance: hasSearch ? "bm25(fts) ASC" : "v.date_pub DESC",
+          relevance: hasSearch ? "rank ASC" : "v.date_pub DESC",
         };
         if (!sortClauses[sort]) {
           return json({ error: "Invalid sort" }, 400);
@@ -135,18 +236,22 @@ const server = Bun.serve({
         const params = [];
 
         if (hasSearch) {
-          joins.push("JOIN videos_fts fts ON v.id = fts.rowid");
+          joins.push("JOIN videos_fts ON v.id = videos_fts.rowid");
           const ftsQuery = rawTerms.map((t) => `"${t}"*`).join(" AND ");
-          conditions.push("fts MATCH ?");
+          conditions.push("videos_fts MATCH ?");
           params.push(ftsQuery);
         }
 
         if (topic === "0") {
           conditions.push("NOT EXISTS (SELECT 1 FROM channel_topics ct WHERE ct.channel_id = v.channel_id)");
         } else if (topic) {
+          const topicId = Number(topic);
+          if (!Number.isSafeInteger(topicId) || topicId < 1) {
+            return json({ error: "topic must be a positive integer or 0" }, 400);
+          }
           joins.push("JOIN channel_topics ct ON v.channel_id = ct.channel_id");
           conditions.push("ct.topic_id = ?");
-          params.push(parseInt(topic));
+          params.push(topicId);
         } else if (channel) {
           conditions.push("v.channel_id = ?");
           params.push(channel);
@@ -154,7 +259,7 @@ const server = Bun.serve({
 
         params.push(limit, offset);
 
-        const rankSelect = search ? ", bm25(fts) as rank" : "";
+        const rankSelect = hasSearch ? ", bm25(videos_fts) as rank" : "";
         const sql = `
           SELECT DISTINCT v.*, c.nom as channel_nom${rankSelect}
           FROM videos v
@@ -229,6 +334,11 @@ const server = Bun.serve({
         if (!resolvedNom || !resolvedId) {
           return json({ error: "nom and channel_id required (or input)" }, 400);
         }
+        if (!isYoutubeChannelId(resolvedId)) {
+          return json({ error: "channel_id must be a valid YouTube channel ID" }, 400);
+        }
+        resolvedNom = String(resolvedNom).trim().slice(0, 200);
+        if (!resolvedNom) return json({ error: "nom required" }, 400);
 
         const existing = stmts.getChannelByYoutubeId.get(resolvedId);
         if (existing) {
@@ -256,7 +366,8 @@ const server = Bun.serve({
 
     "/api/channels/:id/validate": {
       POST: (req) => {
-        const id = parseInt(req.params.id);
+        const id = parsePositiveId(req.params.id);
+        if (!id) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT channel_id, nom FROM channels WHERE id = ?`).get(id);
         if (!ch) return json({ error: "Channel not found" }, 404);
         const validateTx = db.transaction(() => {
@@ -275,7 +386,8 @@ const server = Bun.serve({
 
     "/api/channels/:id/reject": {
       POST: async (req) => {
-        const id = parseInt(req.params.id);
+        const id = parsePositiveId(req.params.id);
+        if (!id) return json({ error: "Invalid channel id" }, 400);
         const body = await readBody(req);
 
         const ch = db.query(`SELECT channel_id, nom FROM channels WHERE id = ?`).get(id);
@@ -298,19 +410,21 @@ const server = Bun.serve({
     },
 
     "/api/channels/:id/score": {
-      POST: async (req) => {
-        const id = parseInt(req.params.id);
+      POST: (req) => runScoringJob(async () => {
+        const id = Number(req.params.id);
+        if (!Number.isSafeInteger(id) || id < 1) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT channel_id FROM channels WHERE id = ?`).get(id);
         if (!ch) return json({ error: "Channel not found" }, 404);
 
         const result = await scoreChannel(ch.channel_id);
         return json(result || { error: "Scoring failed" });
-      },
+      }),
     },
 
     "/api/ingest/:channelId": {
       POST: async (req) => {
         const channelId = req.params.channelId;
+        if (!isYoutubeChannelId(channelId)) return json({ error: "Invalid YouTube channel id" }, 400);
         const result = await ingestChannel(channelId);
         return json(result);
       },
@@ -397,8 +511,8 @@ const server = Bun.serve({
       },
       DELETE: async (req) => {
         const url = new URL(req.url);
-        const id = parseInt(url.searchParams.get("id"));
-        if (!id) return json({ error: "id required" }, 400);
+        const id = parsePositiveId(url.searchParams.get("id"));
+        if (!id) return json({ error: "id must be a positive integer" }, 400);
         stmts.deleteTopic.run(id);
         return json({ ok: true });
       },
@@ -424,23 +538,26 @@ const server = Bun.serve({
     },
 
     "/api/score-all": {
-      POST: async () => {
-        const results = await scoreAllPending();
-        return json({ ok: true, scored: results.length, results });
+      POST: () => {
+        const jobId = startScoringJob("pending", scoreAllPending);
+        if (!jobId) return json({ error: "A scoring job is already in progress" }, 409);
+        return json({ ok: true, status: "running", jobId }, 202);
       },
     },
 
     "/api/score-unscored": {
-      POST: async () => {
-        const results = await scoreAllUnscored();
-        return json({ ok: true, scored: results.length, results });
+      POST: () => {
+        const jobId = startScoringJob("unscored", scoreAllUnscored);
+        if (!jobId) return json({ error: "A scoring job is already in progress" }, 409);
+        return json({ ok: true, status: "running", jobId }, 202);
       },
     },
 
     "/api/rescore-all": {
-      POST: async () => {
-        const results = await rescoreAllChannels();
-        return json({ ok: true, scored: results.length, results });
+      POST: () => {
+        const jobId = startScoringJob("rescore", rescoreAllChannels);
+        if (!jobId) return json({ error: "A scoring job is already in progress" }, 409);
+        return json({ ok: true, status: "running", jobId }, 202);
       },
     },
 
@@ -454,8 +571,11 @@ const server = Bun.serve({
     "/api/feedback": {
       GET: (req) => {
         const url = new URL(req.url);
-        const limit = parseInt(url.searchParams.get("limit") || "20");
-        const feedback = stmts.getRecentRejections.all(limit);
+        const requestedLimit = Number(url.searchParams.get("limit") || "20");
+        if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+          return json({ error: "limit must be >= 1" }, 400);
+        }
+        const feedback = stmts.getRecentRejections.all(Math.min(requestedLimit, 100));
         return json(feedback);
       },
     },
@@ -490,13 +610,87 @@ const server = Bun.serve({
     }
 
     try {
-      // POST /api/discover/related
+      // POST /api/discover/related — start a background job. Results are exposed incrementally below.
       if (method === "POST" && pathname === "/api/discover/related") {
-        const results = await discoverRelatedFromValidated();
-        return json({ ok: true, found: results.length, channels: results });
+        if (isRelatedRunning) {
+          return json({ error: "Related discovery already in progress" }, 409);
+        }
+
+        isRelatedRunning = true;
+        relatedJobId = createJobId();
+        relatedProgress.total = 0;
+        relatedProgress.completed = 0;
+        relatedProgress.found = 0;
+        relatedProgress.current = "";
+        relatedProgress.status = "running";
+        relatedProgress.results = [];
+        relatedProgress.error = "";
+
+        discoverRelatedFromValidated(
+          (completed, total, current, status) => {
+            relatedProgress.total = total;
+            // Multiple validated channels are processed concurrently; never let a late
+            // "started" callback move the visible counter backwards.
+            relatedProgress.completed = Math.max(relatedProgress.completed, completed);
+            relatedProgress.current = current || "";
+            if (status === "done") relatedProgress.current = current || "";
+          },
+          (result) => {
+            relatedProgress.results.push(result);
+            relatedProgress.found = relatedProgress.results.length;
+          }
+        )
+          .then(() => {
+            relatedProgress.status = "done";
+            relatedProgress.completed = relatedProgress.total;
+          })
+          .catch((err) => {
+            relatedProgress.status = "error";
+            relatedProgress.error = err.message;
+            console.error("[Related] Discovery error:", err.message);
+          })
+          .finally(() => {
+            isRelatedRunning = false;
+          });
+
+        return json({ ok: true, status: "running", jobId: relatedJobId }, 202);
+      }
+
+      // GET /api/discover/related/status?job=...&since=N — poll one job and only receive new results.
+      if (method === "GET" && pathname === "/api/discover/related/status") {
+        const requestedJobId = url.searchParams.get("job");
+        const sinceValue = Number(url.searchParams.get("since") || "0");
+        if (!requestedJobId) return json({ error: "job is required" }, 400);
+        if (!Number.isInteger(sinceValue) || sinceValue < 0) {
+          return json({ error: "since must be a non-negative integer" }, 400);
+        }
+        if (requestedJobId !== relatedJobId) {
+          return json({ error: "Related discovery job is no longer available", jobId: relatedJobId }, 409);
+        }
+        return json({
+          jobId: relatedJobId,
+          total: relatedProgress.total,
+          completed: relatedProgress.completed,
+          found: relatedProgress.found,
+          current: relatedProgress.current,
+          status: relatedProgress.status,
+          error: relatedProgress.error,
+          results: relatedProgress.results.slice(sinceValue),
+          next: relatedProgress.results.length,
+        });
       }
 
       // --- API routes handled in fetch (bypass Bun router quirks) ---
+
+      // GET /api/score-status?job=... — live progress for background LLM scoring.
+      if (method === "GET" && pathname === "/api/score-status") {
+        const requestedJobId = url.searchParams.get("job");
+        if (!requestedJobId) return json({ error: "job is required" }, 400);
+        if (requestedJobId !== scoringJobId) {
+          return json({ error: "Scoring job is no longer available", jobId: scoringJobId }, 409);
+        }
+        return json({ ...scoringProgress });
+      }
 
       // GET /api/quota
       if (method === "GET" && pathname === "/api/quota") {
@@ -588,7 +782,8 @@ const server = Bun.serve({
       // /api/channels/:id/topics (GET/POST/DELETE)
       const topicsMatch = pathname.match(/^\/api\/channels\/(\d+)\/topics$/);
       if (topicsMatch) {
-        const chanId = parseInt(topicsMatch[1]);
+        const chanId = parsePositiveId(topicsMatch[1]);
+        if (!chanId) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT channel_id FROM channels WHERE id = ?`).get(chanId);
         if (!ch) return json({ error: "Channel not found" }, 404);
 
@@ -597,13 +792,16 @@ const server = Bun.serve({
         }
         if (method === "POST") {
           const body = await readBody(req);
-          if (!body.topic_id) return json({ error: "topic_id required" }, 400);
-          stmts.assignTopic.run(ch.channel_id, parseInt(body.topic_id));
+          const topicId = parsePositiveId(body.topic_id);
+          if (!topicId) return json({ error: "topic_id must be a positive integer" }, 400);
+          const topic = db.query(`SELECT id FROM topics WHERE id = ?`).get(topicId);
+          if (!topic) return json({ error: "Topic not found" }, 404);
+          stmts.assignTopic.run(ch.channel_id, topicId);
           return json({ ok: true });
         }
         if (method === "DELETE") {
-          const topicId = parseInt(url.searchParams.get("topic_id"));
-          if (!topicId) return json({ error: "topic_id required" }, 400);
+          const topicId = parsePositiveId(url.searchParams.get("topic_id"));
+          if (!topicId) return json({ error: "topic_id must be a positive integer" }, 400);
           stmts.removeTopic.run(ch.channel_id, topicId);
           return json({ ok: true });
         }
@@ -613,7 +811,8 @@ const server = Bun.serve({
       // GET /api/channels/:id/related
       const relatedMatch = pathname.match(/^\/api\/channels\/(\d+)\/related$/);
       if (relatedMatch && method === "GET") {
-        const chanId = parseInt(relatedMatch[1]);
+        const chanId = parsePositiveId(relatedMatch[1]);
+        if (!chanId) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT channel_id FROM channels WHERE id = ?`).get(chanId);
         if (!ch) return json({ error: "Channel not found" }, 404);
         const related = await scrapeRelatedChannels(ch.channel_id);
@@ -623,7 +822,8 @@ const server = Bun.serve({
       // GET /api/channels/:id/preview (3 recent videos for validation preview)
       const previewMatch = pathname.match(/^\/api\/channels\/(\d+)\/preview$/);
       if (previewMatch && method === "GET") {
-        const chanId = parseInt(previewMatch[1]);
+        const chanId = parsePositiveId(previewMatch[1]);
+        if (!chanId) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT channel_id FROM channels WHERE id = ?`).get(chanId);
         if (!ch) return json({ error: "Channel not found" }, 404);
         const videos = db.query(`
@@ -636,7 +836,8 @@ const server = Bun.serve({
       // GET /api/channels/:id/detail (channel info + all videos)
       const detailMatch = pathname.match(/^\/api\/channels\/(\d+)\/detail$/);
       if (detailMatch && method === "GET") {
-        const chanId = parseInt(detailMatch[1]);
+        const chanId = parsePositiveId(detailMatch[1]);
+        if (!chanId) return json({ error: "Invalid channel id" }, 400);
         const ch = db.query(`SELECT * FROM channels WHERE id = ?`).get(chanId);
         if (!ch) return json({ error: "Channel not found" }, 404);
         const videos = db.query(`

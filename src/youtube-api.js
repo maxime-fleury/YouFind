@@ -1041,7 +1041,7 @@ function isLikelyFrench(html) {
 
 // --- Related channel discovery from validated channels ---
 
-export async function discoverRelatedFromValidated(onProgress) {
+export async function discoverRelatedFromValidated(onProgress, onResult) {
   const validated = db.query(`SELECT channel_id, nom FROM channels WHERE status = 'validated'`).all();
   const allExisting = db.query(`SELECT channel_id FROM channels`).all();
   const blacklisted = new Set(stmts.getBlacklistedChannelIds.all().map((r) => r.channel_id));
@@ -1049,11 +1049,10 @@ export async function discoverRelatedFromValidated(onProgress) {
   const excludedIds = new Set([...existingIds, ...blacklisted]);
   const seen = new Set();
   const results = [];
-  let totalChecked = 0;
+  let completed = 0;
 
   await runWithLimit(validated, async (ch) => {
-    totalChecked++;
-    if (onProgress) onProgress(totalChecked, validated.length, ch.nom);
+    onProgress?.(completed, validated.length, ch.nom, "running");
 
     try {
       const related = await scrapeRelatedChannels(ch.channel_id);
@@ -1076,7 +1075,7 @@ export async function discoverRelatedFromValidated(onProgress) {
         rc.source_channel = ch.nom;
         results.push(rc);
 
-        // Insert as pending
+        // Insert as pending before notifying the caller so the UI never gets ahead of the database.
         stmts.insertChannel.run({
           $nom: rc.nom || rc.channelId,
           $channel_id: rc.channelId,
@@ -1084,9 +1083,13 @@ export async function discoverRelatedFromValidated(onProgress) {
           $last_video_date: null,
           $thumbnail: rc.thumbnail || "",
         });
+        onResult?.(rc);
       }
     } catch (err) {
       console.error(`[Related] Failed for ${ch.nom}: ${err.message}`);
+    } finally {
+      completed++;
+      onProgress?.(completed, validated.length, ch.nom, "done");
     }
   }, 3, 500);
 

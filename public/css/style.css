@@ -576,6 +576,92 @@ main, nav, .modal-content {
 .discover-result .dr-stats { font-size: 0.8rem; color: var(--text-muted); }
 .discover-result .dr-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
 
+.score-progress {
+  border-color: rgba(168, 85, 247, 0.28);
+  background: linear-gradient(135deg, rgba(91, 33, 182, 0.16), rgba(15, 23, 42, 0.32));
+  box-shadow: 0 12px 36px rgba(76, 29, 149, 0.14);
+}
+.score-progress-label {
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.score-progress-label i { color: var(--purple-300); margin-right: 6px; }
+.score-progress-count {
+  color: var(--purple-200, var(--purple-300));
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.score-progress-track {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+}
+.score-progress-bar {
+  min-width: 0;
+  background-color: var(--purple-500, #8b5cf6);
+  background-image: linear-gradient(45deg, rgba(255,255,255,0.16) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.16) 75%, transparent 75%, transparent);
+  background-size: 1rem 1rem;
+  transition: width 0.45s ease;
+}
+.score-progress-detail {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.related-progress {
+  position: sticky;
+  top: calc(var(--navbar-height, 70px) + 8px);
+  z-index: 10;
+  backdrop-filter: blur(16px);
+  border-color: rgba(168, 85, 247, 0.28);
+  background: linear-gradient(135deg, rgba(91, 33, 182, 0.16), rgba(15, 23, 42, 0.32));
+  box-shadow: 0 12px 36px rgba(76, 29, 149, 0.14);
+}
+.related-progress-label {
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+.related-progress-label i { color: var(--purple-300); margin-right: 6px; }
+.related-progress-count {
+  color: var(--purple-200, var(--purple-300));
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.related-progress-track {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+}
+.related-progress-bar {
+  min-width: 0;
+  background-color: var(--purple-500, #8b5cf6);
+  background-image: linear-gradient(45deg, rgba(255,255,255,0.16) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.16) 50%, rgba(255,255,255,0.16) 75%, transparent 75%, transparent);
+  background-size: 1rem 1rem;
+  transition: width 0.45s ease;
+}
+.related-progress-detail {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+.related-live-status {
+  color: var(--accent-green);
+  font-size: 0.84rem;
+}
+.related-live-status i { margin-right: 5px; }
+.related-result-enter {
+  animation: relatedResultIn 0.38s ease both;
+}
+@keyframes relatedResultIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .spinner-glass {
   display: inline-block;
   width: 18px;
