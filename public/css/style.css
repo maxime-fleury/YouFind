@@ -79,6 +79,12 @@ body::after {
   }
 }
 
+@keyframes surfaceGradientDrift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 30%; }
+  100% { background-position: 35% 100%; }
+}
+
 main, nav, .modal-content {
   position: relative;
   z-index: 1;
@@ -523,6 +529,26 @@ main, nav, .modal-content {
   transform: rotate(-30deg);
 }
 .stat-card-action i { font-size: 0.72rem; }
+
+/* Slow motion stays limited to the dashboard surfaces, not every glass card in long lists. */
+.stats-overview,
+.stats-card--overview,
+.stats-card--videos,
+.stats-card--rss {
+  background-size: 220% 220%;
+  animation: surfaceGradientDrift 28s ease-in-out infinite alternate;
+}
+.stats-card--overview {
+  background-image: linear-gradient(145deg, rgba(16, 70, 65, 0.3), rgba(15, 23, 42, 0.42)), linear-gradient(120deg, rgba(167, 139, 250, 0.06), transparent 38%, rgba(52, 211, 153, 0.06));
+  background-color: rgba(15, 23, 42, 0.42);
+}
+.stats-card--videos,
+.stats-card--rss {
+  background-image: linear-gradient(120deg, rgba(167, 139, 250, 0.06), transparent 38%, rgba(96, 165, 250, 0.05));
+}
+.stats-card--overview { animation-delay: -8s; }
+.stats-card--videos { animation-delay: -14s; }
+.stats-card--rss { animation-delay: -20s; }
 .stats-card-kicker { color: var(--text-muted); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; }
 .stats-grid .stat-value { margin-top: 10px; font-size: 1.55rem; line-height: 1; }
 .stats-grid .stat-label { margin-top: 5px; font-size: 0.66rem; line-height: 1.2; }
