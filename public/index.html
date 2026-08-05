@@ -9,7 +9,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
-  <link href="/css/style.css?v=20260801-7" rel="stylesheet">
+  <link href="/css/style.css?v=20260801-14" rel="stylesheet">
 </head>
 <body>
 
@@ -144,6 +144,15 @@
         <button class="btn btn-glass" onclick="refreshAllChannelStats()" id="refresh-stats-btn" title="Mettre a jour les stats de toutes les chaines">
           <i class="bi bi-arrow-clockwise"></i> Update stats
         </button>
+        <div class="btn-group">
+          <button class="btn btn-glass dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Exporter toutes les chaines (nom + URL)">
+            <i class="bi bi-download"></i> Exporter
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end export-dropdown">
+            <li><button class="dropdown-item" type="button" onclick="exportChannels('json')"><i class="bi bi-filetype-json"></i> JSON</button></li>
+            <li><button class="dropdown-item" type="button" onclick="exportChannels('csv')"><i class="bi bi-filetype-csv"></i> CSV</button></li>
+          </ul>
+        </div>
       </div>
       <div id="channels-list"></div>
     </div>
@@ -273,6 +282,17 @@
         <div id="related-progress-detail" class="related-progress-detail mt-2">Les chaînes trouvées apparaîtront ici au fur et à mesure.</div>
       </div>
       <div id="related-results"></div>
+      <div id="related-score-status" class="mt-3"></div>
+      <div id="related-score-progress" class="score-progress glass-card p-3 mt-3 d-none" aria-live="polite">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span id="related-score-progress-label" class="score-progress-label"><i class="bi bi-stars"></i> Préparation du scoring...</span>
+          <strong id="related-score-progress-count" class="score-progress-count">0 / 0</strong>
+        </div>
+        <div class="progress score-progress-track" role="progressbar" aria-label="Progression du scoring LLM" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="related-score-progress-bar" class="progress-bar score-progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
+        </div>
+        <div id="related-score-progress-detail" class="score-progress-detail mt-2">Les chaînes seront traitées en parallèle par le LLM.</div>
+      </div>
     </div>
 
 
@@ -399,7 +419,15 @@
               <div class="settings-status-row"><span><i class="bi bi-robot"></i> Moteur LLM</span><span class="text-muted">En attente</span></div>
               <div class="settings-status-row"><span><i class="bi bi-collection-play"></i> YouTube</span><span class="text-muted">Scraping actif</span></div>
             </div>
-            <button class="btn btn-sm-glass w-100 mt-3" onclick="testLLMConnection()"><i class="bi bi-arrow-repeat"></i> Actualiser le diagnostic</button>
+            <div class="settings-quota mt-3" aria-live="polite">
+              <div class="settings-quota-head">
+                <span><i class="bi bi-lightning-charge-fill"></i> Quota YouTube API</span>
+                <strong id="quota-value">--</strong>
+              </div>
+              <div class="settings-quota-track" aria-hidden="true"><div id="quota-bar"></div></div>
+              <small>Requêtes consommées aujourd'hui</small>
+            </div>
+            <button class="btn btn-sm-glass w-100 mt-3" onclick="testLLMConnection();loadQuota()"><i class="bi bi-arrow-repeat"></i> Actualiser le diagnostic</button>
           </div>
 
           <div class="glass-card settings-card settings-tips p-4">
@@ -557,8 +585,12 @@
     YouFind — Ton feed, tes règles. Zéro algorithme, zéro pub.
   </footer>
 
+  <button id="scrollTopBtn" class="scroll-top-btn" type="button" aria-label="Remonter en haut de page" title="Remonter en haut">
+    <i class="bi bi-arrow-up"></i>
+  </button>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/mark.min.js"></script>
-  <script src="/js/app.js?v=20260801-7"></script>
+  <script src="/js/app.js?v=20260801-13"></script>
 </body>
 </html>

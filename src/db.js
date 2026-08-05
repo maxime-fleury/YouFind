@@ -151,6 +151,55 @@ try {
   console.error("[DB] Failed to backfill FTS index:", e.message);
 }
 
+// --- FTS5 full-text search index for channels (trigram => substring search) ---
+// Standalone FTS5 table (no content= linkage). External-content FTS5 tables can
+// throw SQLITE_CORRUPT_VTAB when the index falls out of sync with the content
+// table (e.g. a crash mid-backfill), and a stale index never heals by itself.
+// We rebuild from scratch on every startup so the index always matches the
+// channels table (a few thousand rows rebuild in milliseconds).
+function rebuildChannelsFts() {
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ai;`);
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ad;`);
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_au;`);
+  db.run(`DROP TABLE IF EXISTS channels_fts;`);
+
+  db.run(`
+    CREATE VIRTUAL TABLE channels_fts USING fts5(
+      nom,
+      tokenize='trigram'
+    );
+  `);
+
+  // NOTE: trigger names are prefixed (channels_fts_idx_*) to avoid clobbering the
+  // pre-existing channels_fts_au trigger that syncs videos_fts on channel rename.
+  db.run(`
+    CREATE TRIGGER channels_fts_idx_ai AFTER INSERT ON channels
+    BEGIN
+      INSERT INTO channels_fts(rowid, nom) VALUES (new.id, new.nom);
+    END;
+
+    CREATE TRIGGER channels_fts_idx_ad AFTER DELETE ON channels
+    BEGIN
+      DELETE FROM channels_fts WHERE rowid = old.id;
+    END;
+
+    CREATE TRIGGER channels_fts_idx_au AFTER UPDATE OF nom ON channels
+    BEGIN
+      DELETE FROM channels_fts WHERE rowid = old.id;
+      INSERT INTO channels_fts(rowid, nom) VALUES (new.id, new.nom);
+    END;
+  `);
+
+  db.run(`INSERT INTO channels_fts(rowid, nom) SELECT id, nom FROM channels;`);
+}
+
+try {
+  rebuildChannelsFts();
+  console.log("[DB] Channels FTS index rebuilt.");
+} catch (e) {
+  console.error("[DB] Failed to rebuild channels FTS index:", e.message);
+}
+
 // Backfill rejected channels from feedback_log (for historical data before we kept channels in DB)
 try {
   const rejectedCount = db.query(`SELECT count(*) as c FROM channels WHERE status = 'rejected'`).get().c;
@@ -349,4 +398,4 @@ const stmts = {
   `),
 };
 
-export { db, stmts, getSetting, setSetting, getAllSettings };
+export { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts };

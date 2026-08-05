@@ -1,9 +1,9 @@
 import { join, dirname, resolve, relative } from "path";
-import { db, stmts, getSetting, setSetting, getAllSettings } from "./db.js";
+import { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts } from "./db.js";
 import { ingestChannel, refreshAllChannels } from "./rss.js";
 import { discoverFromTopic, getQuotaUsage, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
-import { startCron } from "./cron.js";
+import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
 
 const PORT = parseInt(Bun.env.PORT || "3000");
 const HOST = Bun.env.HOST || "127.0.0.1";
@@ -215,7 +215,14 @@ const server = Bun.serve({
   idleTimeout: 255,
   routes: {
     "/api/stats": {
-      GET: () => json(stmts.getStats.get()),
+      GET: () => {
+        const stats = stmts.getStats.get();
+        return json({
+          ...stats,
+          rss: getRSSInfo(),
+          refreshRunning: refreshProgress.status === "running",
+        });
+      },
     },
 
     "/api/videos": {
@@ -311,8 +318,76 @@ const server = Bun.serve({
         const url = new URL(req.url);
         const status = url.searchParams.get("status");
         const include = url.searchParams.get("include");
+        const q = url.searchParams.get("q")?.trim() || "";
         let channels;
-        if (status === "rejected") {
+
+        const hasChannelFts = !!db.query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channels_fts'`).get();
+
+        if (q) {
+          // Safe term extraction: keep letters/digits/accents/hyphens, drop FTS syntax.
+          const terms = q
+            .replace(/['"]/g, "")
+            .split(/\s+/)
+            .map((t) => t.replace(/[^\w\u00C0-\u00FF-]/g, ""))
+            .filter((t) => t.length > 0);
+          if (terms.length > 0 && hasChannelFts) {
+            // Fast candidate pre-filter through the FTS5 trigram index (substring match).
+            // The trigram tokenizer needs >= 3 chars per term; shorter terms fall back to LIKE.
+            const ftsTerms = terms.filter((t) => t.length >= 3);
+            const likeTerms = terms.filter((t) => t.length < 3);
+            const conditions = [];
+            const params = [];
+            if (ftsTerms.length) {
+              conditions.push("channels_fts MATCH ?");
+              params.push(ftsTerms.map((t) => `\"${t}\"`).join(" AND "));
+            }
+            // Escape LIKE wildcards (% _) in the short-term fallback.
+            const esc = (t) => t.replace(/[\\%_]/g, (m) => `\\${m}`);
+            for (const t of likeTerms) {
+              conditions.push("c.nom LIKE ? ESCAPE '\\'");
+              params.push(`%${esc(t)}%`);
+            }
+            if (status) {
+              conditions.push("c.status = ?");
+              params.push(status);
+            }
+            const sql = `
+              SELECT DISTINCT c.*
+              FROM channels_fts
+              JOIN channels c ON c.rowid = channels_fts.rowid
+              WHERE ${conditions.join(" AND ")}
+              ORDER BY bm25(channels_fts, 10.0)
+              LIMIT 200
+            `;
+            try {
+              channels = db.query(sql).all(...params);
+            } catch (err) {
+              // Self-heal: a stale/corrupt FTS index (SQLITE_CORRUPT_VTAB) would
+              // otherwise 500 every search. Rebuild it once and retry.
+              if (err.code === "SQLITE_CORRUPT_VTAB") {
+                console.error("[Server] channels_fts corrupt — rebuilding index:", err.message);
+                try {
+                  rebuildChannelsFts();
+                  channels = db.query(sql).all(...params);
+                } catch (rebuildErr) {
+                  console.error("[Server] channels_fts rebuild failed:", rebuildErr.message);
+                  throw rebuildErr;
+                }
+              } else {
+                throw err;
+              }
+            }
+          } else if (terms.length > 0) {
+            // No FTS index (or query too short for trigram): plain LIKE fallback over the whole table.
+            const esc = (t) => t.replace(/[\\%_]/g, (m) => `\\${m}`);
+            const like = `%${esc(q)}%`;
+            channels = status
+              ? db.query(`SELECT * FROM channels WHERE status = ? AND nom LIKE ? ESCAPE '\\' ORDER BY date_ajout DESC LIMIT 200`).all(status, like)
+              : db.query(`SELECT * FROM channels WHERE nom LIKE ? ESCAPE '\\' ORDER BY date_ajout DESC LIMIT 200`).all(like);
+          } else {
+            channels = [];
+          }
+        } else if (status === "rejected") {
           channels = stmts.getChannelsByStatus.all(status);
           if (channels.length === 0) {
             channels = stmts.getRejectedFromFeedback.all();
@@ -326,9 +401,11 @@ const server = Bun.serve({
         if (include === "topics,preview") {
           channels = channels.map((ch) => {
             const topics = stmts.getChannelTopics.all(ch.channel_id);
-            const preview_videos = db.query(
-              `SELECT titre, thumbnail, vues, url FROM videos WHERE channel_id = ? ORDER BY date_pub DESC LIMIT 3`
-            ).all(ch.channel_id);
+            const preview_videos = ch.status === "pending"
+              ? db.query(
+                  `SELECT titre, thumbnail, vues, url FROM videos WHERE channel_id = ? ORDER BY date_pub DESC LIMIT 3`
+                ).all(ch.channel_id)
+              : [];
             return { ...ch, topics, preview_videos };
           });
         }
@@ -469,6 +546,7 @@ const server = Bun.serve({
         })
           .then((results) => {
             refreshProgress.status = "done";
+            markRSSLastRun();
             console.log(`[Refresh] Completed: ${results.length} channels`);
           })
           .catch((e) => {

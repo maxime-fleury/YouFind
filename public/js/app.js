@@ -145,13 +145,85 @@ function renderStatsLoading(container) {
       <section class="stats-overview stats-overview-loading" aria-label="Chargement des statistiques">
         <div class="stats-overview-head">
           <div class="stats-heading-skeleton"></div>
-          <div class="stats-total-skeleton"></div>
         </div>
         <div class="stats-grid">
-          ${Array.from({ length: 6 }, () => '<div class="stat-card stat-card-skeleton"><span></span><b></b><i></i></div>').join("")}
+          ${Array.from({ length: 3 }, () => '<div class="stat-card stat-card-skeleton"><span></span><b></b><i></i></div>').join("")}
         </div>
       </section>
     </div>`;
+}
+
+// --- RSS schedule display helpers ---
+
+function formatCountdown(ms) {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  if (ms <= 0) return "à l'instant";
+  const totalMin = Math.ceil(ms / 60000);
+  if (totalMin < 2) return "<1 min";
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h < 24) return m > 0 ? `${h}h ${String(m).padStart(2, "0")}` : `${h}h`;
+  return `${Math.floor(h / 24)}j ${h % 24}h`;
+}
+
+function formatTimeAgo(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return "jamais";
+  const diff = Date.now() - ms;
+  if (diff < 60000) return "à l'instant";
+  const min = Math.floor(diff / 60000);
+  if (min < 60) return `il y a ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `il y a ${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `il y a ${d}j`;
+  return `il y a ${Math.floor(d / 7)} sem`;
+}
+
+let rssCountdownTimer = null;
+let rssStatsSyncAt = 0;
+let rssStatsSyncPromise = null;
+
+function syncRssStats() {
+  if (rssStatsSyncPromise) return rssStatsSyncPromise;
+  rssStatsSyncAt = Date.now();
+  rssStatsSyncPromise = loadStats().finally(() => {
+    rssStatsSyncPromise = null;
+  });
+  return rssStatsSyncPromise;
+}
+
+function updateRssCountdown() {
+  const card = document.querySelector(".stats-card--rss");
+  if (!card) {
+    if (rssCountdownTimer) { clearInterval(rssCountdownTimer); rssCountdownTimer = null; }
+    return;
+  }
+  const running = card.dataset.running === "1";
+  const nextAt = Number(card.dataset.next) || 0;
+  const lastAt = Number(card.dataset.last) || 0;
+  const valueEl = card.querySelector(".stat-value");
+  const detailEl = card.querySelector(".stat-detail");
+  if (!valueEl || !detailEl) return;
+  if (running) {
+    valueEl.textContent = "En cours…";
+    detailEl.textContent = "Rafraîchissement des flux";
+    if (Date.now() - rssStatsSyncAt > 30000) syncRssStats();
+    return;
+  }
+  const remaining = nextAt ? nextAt - Date.now() : null;
+  valueEl.textContent = formatCountdown(remaining);
+  detailEl.textContent = `Dernier : ${formatTimeAgo(lastAt)}`;
+  // The cron publishes a new nextRunAt after the job finishes. Refresh the
+  // schedule when the displayed deadline is reached instead of getting stuck.
+  if (remaining != null && remaining <= 0 && Date.now() - rssStatsSyncAt > 10000) syncRssStats();
+  // Keep the last-run label accurate even when the countdown is long.
+  else if (Date.now() - rssStatsSyncAt > 60000) syncRssStats();
+}
+
+function scheduleRssCountdown() {
+  if (rssCountdownTimer) return;
+  rssCountdownTimer = setInterval(updateRssCountdown, 15000);
 }
 
 async function loadStats() {
@@ -164,10 +236,14 @@ async function loadStats() {
     const validated = Number(stats.validated_channels) || 0;
     const pending = Number(stats.pending_channels) || 0;
     const rejected = Number(stats.rejected_channels) || 0;
-    const toReview = pending + rejected;
-    const ratio = Number(stats.validated_channel_ratio) || 0;
-    const total = Number(stats.total_channels) || validated + toReview;
-    const ratioWidth = Math.min(100, Math.max(0, ratio));
+    const total = Number(stats.total_channels) || 0;
+    const videos = Number(stats.total_videos) || 0;
+    const validPct = total > 0 ? Math.min(100, Math.max(0, Math.round((validated / total) * 100))) : 0;
+    const rejectedPct = total > 0 ? Math.min(100, Math.max(0, (rejected / total) * 100)) : 0;
+    const rss = stats.rss || {};
+    const rssRunning = Boolean(stats.refreshRunning);
+    const nextAt = Number(rss.nextRunAt) || 0;
+    const lastAt = Number(rss.lastRunAt) || 0;
 
     container.innerHTML = `
       <div class="col-12">
@@ -176,58 +252,67 @@ async function loadStats() {
             <div>
               <span class="stats-eyebrow"><i class="bi bi-bar-chart-line-fill"></i> Tableau de bord</span>
               <h2 class="stats-overview-title">Vue d'ensemble</h2>
-              <p class="stats-overview-subtitle">Un aperçu rapide de ta bibliothèque et de ta file de tri.</p>
             </div>
-            <div class="stats-total-pill">
-              <span class="stats-total-icon"><i class="bi bi-collection-play-fill"></i></span>
-              <span><strong>${formatStatCount(total)}</strong> chaînes suivies</span>
-            </div>
+            <span class="stats-overview-subtitle">Ta bibliothèque en un coup d'œil</span>
           </div>
 
           <div class="stats-grid">
-            <article class="stat-card stats-card--validated">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-check2-circle"></i></span><span class="stats-card-kicker">Bibliothèque</span></div>
-              <div class="stat-value">${formatStatCount(validated)}</div>
-              <div class="stat-label">Chaînes validées</div>
-              <div class="stat-detail">Dans ton feed vidéo</div>
+            <article class="stat-card stats-card--overview">
+              <div class="stats-card-top">
+                <span class="stats-card-icon"><i class="bi bi-check2-circle"></i></span>
+                <span class="stats-card-kicker">Suivi des chaînes</span>
+                <span class="stats-overview-total">${formatStatCount(total)} au total</span>
+              </div>
+              <div class="stats-overview-main">
+                <div class="stats-overview-primary">
+                  <div class="stat-value">${formatStatCount(validated)}</div>
+                  <div class="stat-label">chaînes validées <span>sur ${formatStatCount(total)}</span></div>
+                </div>
+                <div class="stats-overview-share">
+                  <strong>${validPct}%</strong>
+                  <span>de ta bibliothèque</span>
+                </div>
+              </div>
+              <div class="stat-progress" role="progressbar" aria-label="Part des chaînes validées sur le total" aria-valuenow="${validPct}" aria-valuemin="0" aria-valuemax="100"><div style="width:${validPct}%"></div></div>
+              <div class="stats-overview-breakdown">
+                <div class="stats-overview-metric stats-overview-metric--rejected">
+                  <strong>${formatStatCount(rejected)}</strong>
+                  <span>rejetées <em>${rejectedPct.toFixed(1)}%</em></span>
+                </div>
+                <span class="stats-overview-divider" aria-hidden="true"></span>
+                <div class="stats-overview-metric stats-overview-metric--pending">
+                  <strong>${formatStatCount(pending)}</strong>
+                  <span>en attente</span>
+                </div>
+              </div>
             </article>
-            <article class="stat-card stats-card--pending">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-hourglass-split"></i></span><span class="stats-card-kicker">À décider</span></div>
-              <div class="stat-value">${formatStatCount(pending)}</div>
-              <div class="stat-label">En attente</div>
-              <div class="stat-detail">Prêtes pour ton tri</div>
+            <article class="stat-card stats-card--compact stats-card--videos">
+              <div class="stats-compact-header">
+                <span class="stats-card-kicker">Feed</span>
+                <span class="stats-card-icon"><i class="bi bi-camera-reels-fill"></i></span>
+              </div>
+              <div class="stat-value stats-compact-value">${formatStatCount(videos)}</div>
+              <div class="stats-compact-footer">
+                <span class="stats-detail-compact">Ton feed vidéo</span>
+                <span class="stats-label-compact">Vidéos suivies</span>
+              </div>
             </article>
-            <article class="stat-card stats-card--rejected">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-x-circle"></i></span><span class="stats-card-kicker">Historique</span></div>
-              <div class="stat-value">${formatStatCount(rejected)}</div>
-              <div class="stat-label">Rejetées</div>
-              <div class="stat-detail">Exclues de la sélection</div>
-            </article>
-            <article class="stat-card stat-card-ratio stats-card--ratio">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-pie-chart-fill"></i></span><span class="stats-card-kicker">Progression</span></div>
-              <div class="stat-value">${ratio.toFixed(1)}%</div>
-              <div class="stat-label">Validées / (rejetées + attente)</div>
-              <div class="stat-detail">${formatStatCount(validated)} validées sur ${formatStatCount(toReview)} à traiter</div>
-              <div class="stat-progress" role="progressbar" aria-label="Ratio des chaînes validées sur les chaînes rejetées et en attente" aria-valuenow="${ratio}" aria-valuemin="0" aria-valuemax="100"><div style="width:${ratioWidth}%"></div></div>
-            </article>
-            <article class="stat-card stats-card--topics">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-bookmark-star-fill"></i></span><span class="stats-card-kicker">Organisation</span></div>
-              <div class="stat-value">${formatStatCount(stats.total_topics)}</div>
-              <div class="stat-label">Topics</div>
-              <div class="stat-detail">Pour classer tes chaînes</div>
-            </article>
-            <article class="stat-card stats-card--quota" id="quota-stat">
-              <div class="stats-card-top"><span class="stats-card-icon"><i class="bi bi-lightning-charge-fill"></i></span><span class="stats-card-kicker">YouTube API</span></div>
-              <div class="stat-value" id="quota-value">--</div>
-              <div class="stat-label">Quota utilisé</div>
-              <div class="stat-detail">Requêtes consommées aujourd'hui</div>
-              <div class="stat-progress" aria-hidden="true"><div id="quota-bar" style="width:0%"></div></div>
+            <article class="stat-card stats-card--compact stats-card--rss" data-next="${nextAt}" data-last="${lastAt}" data-running="${rssRunning ? 1 : 0}">
+              <div class="stats-compact-header">
+                <span class="stats-card-kicker">Automatique</span>
+                <span class="stats-card-icon"><i class="bi bi-rss"></i></span>
+              </div>
+              <div class="stats-detail stats-detail-compact">${rssRunning ? "Rafraîchissement des flux" : `Dernier : ${formatTimeAgo(lastAt)}`}</div>
+              <div class="stat-value stats-compact-value">${rssRunning ? "En cours…" : formatCountdown(nextAt ? nextAt - Date.now() : null)}</div>
+              <div class="stats-compact-footer">
+                <span class="stats-label-compact">Prochain refresh RSS <button class="stat-card-action" type="button" onclick="event.stopPropagation();refreshRSS()" title="Actualiser les flux maintenant" aria-label="Actualiser les flux RSS maintenant"><i class="bi bi-arrow-clockwise"></i></button></span>
+              </div>
             </article>
           </div>
         </section>
       </div>`;
     container.dataset.loaded = "true";
-    loadQuota();
+    scheduleRssCountdown();
   } catch (err) {
     console.error("Failed to load stats:", err);
     delete container.dataset.loaded;
@@ -469,15 +554,46 @@ function fuzzyMatch(text, query) {
   return { match: qi >= q.length, score };
 }
 
+let channelSearchDebounce = null;
+let channelSearchSeq = 0;
+
 function filterChannels() {
-  const q = document.getElementById("channel-search").value.trim();
-  renderChannels(q);
+  clearTimeout(channelSearchDebounce);
+  channelSearchDebounce = setTimeout(() => {
+    const q = document.getElementById("channel-search").value.trim();
+    searchChannels(q);
+  }, 150);
 }
 
-function renderChannels(searchQuery) {
+async function searchChannels(q) {
+  const seq = ++channelSearchSeq;
+  if (!q) return renderChannels("");
+  const filter = document.getElementById("channel-filter").value;
+  let serverMatches = null;
+  try {
+    const params = new URLSearchParams({ include: "topics,preview", q });
+    if (filter) params.set("status", filter);
+    serverMatches = await api(`/channels?${params.toString()}`);
+  } catch (err) {
+    console.error("[searchChannels]", err);
+    serverMatches = null;
+  }
+  // Ignore stale responses: a newer keystroke may have superseded this one.
+  if (seq !== channelSearchSeq) return;
+  // Server-side FTS5 gave candidates: re-rank them with fuzzy to keep fuzzy behavior.
+  // Otherwise fall back to local fuzzy over the cached list (typos / very short queries).
+  if (Array.isArray(serverMatches) && serverMatches.length > 0) {
+    renderChannels(q, serverMatches);
+  } else {
+    renderChannels(q, _allChannels);
+  }
+}
+
+const CHANNEL_RENDER_CAP = 200;
+
+function renderChannels(searchQuery, channels = _allChannels) {
   const list = document.getElementById("channels-list");
 
-  let channels = _allChannels;
   if (searchQuery) {
     const results = channels.map((ch) => ({ ch, ...fuzzyMatch(ch.nom, searchQuery) })).filter((r) => r.match);
     results.sort((a, b) => b.score - a.score);
@@ -494,9 +610,10 @@ function renderChannels(searchQuery) {
     return;
   }
 
-  const topicsPromise = api("/topics");
+  const shown = channels.slice(0, CHANNEL_RENDER_CAP);
+  const hiddenCount = channels.length - shown.length;
 
-  list.innerHTML = channels
+  list.innerHTML = shown
     .map(
       (ch) => `
       <div class="channel-card mb-3" id="ch-${ch.id}">
@@ -546,7 +663,14 @@ function renderChannels(searchQuery) {
               </button>
             </div>
             <div class="ch-actions-divider"></div>`
-                : ""
+                : ch.status === "rejected"
+                  ? `<div class="ch-actions-row">
+              <button class="btn btn-success-glass btn-sm" onclick="validateChannel(${ch.id})" title="Valider cette chaîne rejetée">
+                <i class="bi bi-check-lg"></i> Valider
+              </button>
+            </div>
+            <div class="ch-actions-divider"></div>`
+                  : ""
           }
           <div class="ch-actions-row">
             <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}','_blank')" title="Voir sur YouTube">
@@ -556,7 +680,10 @@ function renderChannels(searchQuery) {
         </div>
       </div>`
     )
-    .join("");
+    .join("")
+    + (hiddenCount > 0
+      ? `<div class="text-center text-muted py-3" style="font-size:0.78rem">${hiddenCount} autre${hiddenCount > 1 ? "s" : ""} chaîne${hiddenCount > 1 ? "s" : ""} — affines ta recherche pour en voir plus</div>`
+      : "");
 
   if (searchQuery) {
     new Mark(list).mark(searchQuery, {
@@ -567,17 +694,56 @@ function renderChannels(searchQuery) {
     });
   }
 
-  topicsPromise.then((allTopics) => {
-    channels.forEach((ch) => {
-      const sel = document.getElementById(`topic-select-${ch.id}`);
-      if (sel) {
-        sel.innerHTML = `<option value="">+ Topic</option>
-          ${allTopics.map((t) => `<option value="${t.id}">${escapeHtml(t.nom)}</option>`).join("")}`;
-      }
-      renderChannelTopicBadges(ch.id, ch.topics || [], ch.nom);
-      if (ch.status === "pending") renderChannelPreview(ch.id, ch.preview_videos || []);
-    });
+  channels.forEach((ch) => {
+    renderChannelTopicBadges(ch.id, ch.topics || [], ch.nom);
+    if (ch.status === "pending") renderChannelPreview(ch.id, ch.preview_videos || []);
   });
+}
+
+function downloadTextFile(content, filename, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Prevent CSV formula injection (Excel interprets =, +, -, @ as formulas).
+function csvEscape(value) {
+  let s = String(value ?? "");
+  if (/^[=+\-@]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+async function exportChannels(format) {
+  try {
+    // Toutes les chaines, quel que soit le filtre courant
+    const channels = await api("/channels");
+    const rows = channels.map((ch) => {
+      const id = safeChannelId(ch.channel_id);
+      return {
+        nom: ch.nom || "",
+        url: id ? `https://youtube.com/channel/${id}` : "",
+      };
+    }).filter((r) => r.url);
+    if (!rows.length) return showToast("Aucune chaine a exporter", "info");
+
+    const date = new Date().toISOString().slice(0, 10);
+    if (format === "csv") {
+      const header = "nom,url";
+      const lines = rows.map((r) => `${csvEscape(r.nom)},${csvEscape(r.url)}`);
+      downloadTextFile("\uFEFF" + [header, ...lines].join("\n"), `youfind-chaines-${date}.csv`, "text/csv;charset=utf-8");
+    } else {
+      downloadTextFile(JSON.stringify(rows, null, 2), `youfind-chaines-${date}.json`, "application/json;charset=utf-8");
+    }
+    showToast(`Export ${format.toUpperCase()} : ${rows.length} chaines`, "success");
+  } catch (err) {
+    showToast("Erreur export : " + err.message, "error");
+  }
 }
 
 let isDiscovering = false;
@@ -769,12 +935,12 @@ function clearDiscoveryResults() {
 
 let isScoreProgressRunning = false;
 
-function updateScoreProgress(data, labelText) {
-  const progress = document.getElementById("score-progress");
-  const label = document.getElementById("score-progress-label");
-  const count = document.getElementById("score-progress-count");
-  const bar = document.getElementById("score-progress-bar");
-  const detail = document.getElementById("score-progress-detail");
+function updateScoreProgress(data, labelText, prefix = "score") {
+  const progress = document.getElementById(`${prefix}-progress`);
+  const label = document.getElementById(`${prefix}-progress-label`);
+  const count = document.getElementById(`${prefix}-progress-count`);
+  const bar = document.getElementById(`${prefix}-progress-bar`);
+  const detail = document.getElementById(`${prefix}-progress-detail`);
   const track = progress?.querySelector(".score-progress-track");
   if (!progress || !label || !count || !bar || !detail) return;
 
@@ -803,18 +969,19 @@ function updateScoreProgress(data, labelText) {
   }
 }
 
-async function runScoreJob(endpoint, labelText, successText) {
+async function runScoreJob(endpoint, labelText, successText, prefix = "score") {
   if (isScoreProgressRunning) {
     showToast("Un scoring est déjà en cours...", "info");
     return;
   }
   isScoreProgressRunning = true;
 
-  const status = document.getElementById("score-status");
-  const buttons = document.querySelectorAll("#page-discover button[onclick^=\"score\"], #page-discover button[onclick^=\"rescore\"]");
+  const status = document.getElementById(`${prefix}-status`);
+  const scopeId = prefix === "score" ? "page-discover" : "page-related";
+  const buttons = document.querySelectorAll(`#${scopeId} button[onclick^="score"], #${scopeId} button[onclick^="rescore"]`);
   buttons.forEach((button) => { button.disabled = true; });
   status.innerHTML = `<span class="spinner-glass"></span> ${escapeHtml(labelText)}`;
-  updateScoreProgress({ status: "running", total: 0, completed: 0, scored: 0 }, labelText);
+  updateScoreProgress({ status: "running", total: 0, completed: 0, scored: 0 }, labelText, prefix);
 
   let jobId = "";
   let lastStatus = null;
@@ -839,7 +1006,7 @@ async function runScoreJob(endpoint, labelText, successText) {
         continue;
       }
       lastStatus = data;
-      updateScoreProgress(data, labelText);
+      updateScoreProgress(data, labelText, prefix);
 
       if (data.status === "done") {
         status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}</span>`;
@@ -854,7 +1021,7 @@ async function runScoreJob(endpoint, labelText, successText) {
 
     throw new Error("Le suivi a expiré après deux heures, mais le scoring peut continuer sur le serveur.");
   } catch (err) {
-    updateScoreProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, scored: 0 }, labelText);
+    updateScoreProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, scored: 0 }, labelText, prefix);
     status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${escapeHtml(err.message)}</span>`;
   } finally {
     isScoreProgressRunning = false;
@@ -866,8 +1033,8 @@ function scoreAll() {
   return runScoreJob("/score-all", "Scoring des chaînes en attente...", "Chaînes scorées");
 }
 
-function scoreAllUnscored() {
-  return runScoreJob("/score-unscored", "Scoring des chaînes non scorées...", "Chaînes scorées");
+function scoreAllUnscored(prefix = "score") {
+  return runScoreJob("/score-unscored", "Scoring des chaînes non scorées...", "Chaînes scorées", prefix);
 }
 
 function rescoreAll() {
@@ -1714,6 +1881,7 @@ async function loadSettings() {
     toggleLLMFields();
     updateSettingsStatus(settings);
     await loadLLMHealth();
+    loadQuota();
     setSettingsSaveState("Réglages chargés", "success");
   } catch (err) {
     console.error("[loadSettings]", err);
@@ -1983,6 +2151,7 @@ async function runRelatedDiscovery() {
           status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
         }
         loadStats();
+        scoreAllUnscored("related-score");
         return;
       }
       if (data.status === "error") {
@@ -2155,6 +2324,25 @@ async function loadChannelPreview(channelId, videos = null) {
     container.innerHTML = '';
   }
 }
+
+// --- Scroll-to-top floating button ---
+(function initScrollTopButton() {
+  const btn = document.getElementById("scrollTopBtn");
+  if (!btn) return;
+  let ticking = false;
+  const update = () => {
+    btn.classList.toggle("visible", window.scrollY > 400);
+    ticking = false;
+  };
+  window.addEventListener("scroll", () => {
+    if (!ticking) {
+      requestAnimationFrame(update);
+      ticking = true;
+    }
+  }, { passive: true });
+  btn.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+  update();
+})();
 
 // Fallback if stored page no longer exists
 if (!document.getElementById(`page-${currentPage}`)) {
