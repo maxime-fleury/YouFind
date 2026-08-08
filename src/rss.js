@@ -232,7 +232,14 @@ const REFRESH_SKIP_WINDOW_MS = 30 * 60 * 1000;
 // Full-catalog crawl: fetch up to this many videos per channel (vs 30-100 for
 // the regular refresh). Most channels have fewer than 500, so in practice this
 // grabs their whole backlog.
-const DEEP_REFRESH_MAX_VIDEOS = 500;
+export const DEEP_REFRESH_MAX_VIDEOS = 500;
+
+// Deep-crawl a single channel (full backlog) and mark it as freshly refreshed.
+export async function deepIngestChannel(channelId) {
+  const result = await ingestChannel(channelId, { maxVideos: DEEP_REFRESH_MAX_VIDEOS });
+  stmts.updateChannelLastRefresh.run(String(Date.now()), channelId);
+  return result;
+}
 
 export async function refreshAllVideos(onProgress) {
   const channels = stmts.getChannelsByStatus.all("validated");
@@ -248,9 +255,8 @@ export async function refreshAllVideos(onProgress) {
       console.log(`[RSS] Deep refresh ${ch.nom} (${ch.channel_id})...`);
       if (onProgress) onProgress({ current: idx, total, nom: ch.nom, status: "running" });
       try {
-        const result = await ingestChannel(ch.channel_id, { maxVideos: DEEP_REFRESH_MAX_VIDEOS });
+        const result = await deepIngestChannel(ch.channel_id);
         refreshed++;
-        stmts.updateChannelLastRefresh.run(String(Date.now()), ch.channel_id);
         results.push({ channel: ch.nom, ...result });
         if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", result });
       } catch (e) {

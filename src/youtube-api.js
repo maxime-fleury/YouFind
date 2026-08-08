@@ -170,20 +170,40 @@ function setCachedPage(url, data) {
   pageCache.set(url, { data, time: Date.now() });
 }
 
-async function fetchPageText(url) {
+async function fetchPageText(url, { retries = 1 } = {}) {
   const cached = getCachedPage(url);
   if (cached !== null) return cached;
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-      "Accept-Language": "en-US,en;q=0.9",
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) return "";
-  const text = await res.text();
-  setCachedPage(url, text);
-  return text;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        // Channel pages are heavy (~750KB); 15s was too tight when several
+        // deep crawls ran concurrently and YouTube slowed down.
+        signal: AbortSignal.timeout(30000),
+      });
+      if (res.ok) {
+        const text = await res.text();
+        setCachedPage(url, text);
+        return text;
+      }
+      // Transient server errors (429 rate-limit, 5xx) can recover on retry;
+      // 4xx are final and won't improve. Failures are never cached.
+      if (res.status >= 500 || res.status === 429) {
+        if (attempt < retries) {
+          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+          continue;
+        }
+      }
+      return "";
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
 }
 
 function decodeHtmlEntities(str) {
@@ -540,6 +560,8 @@ async function fetchContinuation(continuation, apiKey, clientVersion = "2.202401
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
     body: JSON.stringify(body),
+    // Continuation fetches had no timeout at all and could hang forever.
+    signal: AbortSignal.timeout(20000),
   });
   if (!res.ok) return null;
   return res.json();

@@ -2216,6 +2216,8 @@ async function quickReject(channelId, name, btn) {
 }
 
 // --- Channel Detail Modal ---
+let currentDetailChannel = null;
+
 async function openChannelDetail(id) {
   document.getElementById("detail-ch-name").textContent = "Chargement...";
   document.getElementById("detail-ch-meta").textContent = "";
@@ -2228,6 +2230,13 @@ async function openChannelDetail(id) {
   try {
     const data = await api(`/channels/${id}/detail`);
     const ch = data.channel;
+    currentDetailChannel = { id, channel_id: ch.channel_id };
+
+    // Reset the refresh button state in case a previous run left it disabled.
+    const refreshBtn = document.getElementById("btn-detail-refresh-videos");
+    refreshBtn?.querySelector(".btn-icon")?.classList.remove("spinning");
+    refreshBtn?.removeAttribute("disabled");
+    refreshBtn?.removeAttribute("aria-busy");
 
     document.getElementById("detail-ch-thumb").src = ch.thumbnail || "";
     document.getElementById("detail-ch-name").textContent = ch.nom;
@@ -2261,6 +2270,50 @@ async function openChannelDetail(id) {
     document.getElementById("detail-ch-name").textContent = "Erreur";
     document.getElementById("detail-ch-related").innerHTML = `<div class="text-muted">${err.message}</div>`;
   }
+}
+
+// Deep-crawl the currently open channel: fetch its full backlog (up to 500
+// videos) and add whatever is missing, then refresh the modal's video list.
+async function refreshChannelVideos() {
+  if (!currentDetailChannel) return;
+  const btn = document.getElementById("btn-detail-refresh-videos");
+  const icon = btn?.querySelector(".btn-icon");
+  icon?.classList.add("spinning");
+  btn?.setAttribute("disabled", "true");
+  btn?.setAttribute("aria-busy", "true");
+
+  try {
+    const result = await api(`/ingest/${currentDetailChannel.channel_id}/deep`, {
+      method: "POST",
+      timeout: 10 * 60 * 1000,
+    });
+    showToast(
+      `Refresh videos : ${result.added} vidéo${result.added > 1 ? "s" : ""} ajoutée${result.added > 1 ? "s" : ""} (${result.total} trouvées)`,
+      "success"
+    );
+    await reloadChannelDetailVideos(currentDetailChannel.id);
+  } catch (err) {
+    showToast("Erreur refresh videos : " + err.message, "error");
+  } finally {
+    icon?.classList.remove("spinning");
+    btn?.removeAttribute("disabled");
+    btn?.removeAttribute("aria-busy");
+  }
+}
+
+async function reloadChannelDetailVideos(id) {
+  try {
+    const data = await api(`/channels/${id}/detail`);
+    document.getElementById("detail-ch-meta").textContent =
+      `${formatNumber(data.channel.subscriber_count)} abonnes | ${data.channel.status}`;
+    const container = document.getElementById("detail-ch-videos");
+    if (data.videos.length === 0) {
+      container.innerHTML = '<div class="col-12 text-muted text-center py-3" style="font-size:0.85rem">Aucune video</div>';
+    } else {
+      const seenSet = getSeenVideos();
+      container.innerHTML = data.videos.map((v) => renderVideoCard(v, seenSet)).join("");
+    }
+  } catch { /* keep the current list if the reload fails */ }
 }
 
 async function loadRelatedChannels(channelId) {

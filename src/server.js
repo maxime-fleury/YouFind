@@ -1,6 +1,6 @@
 import { join, dirname, resolve, relative } from "path";
 import { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts } from "./db.js";
-import { ingestChannel, refreshAllChannels, refreshAllVideos } from "./rss.js";
+import { ingestChannel, refreshAllChannels, refreshAllVideos, deepIngestChannel } from "./rss.js";
 import { discoverFromTopic, getQuotaUsage, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
@@ -525,6 +525,15 @@ const server = Bun.serve({
         const channelId = req.params.channelId;
         if (!isYoutubeChannelId(channelId)) return json({ error: "Invalid YouTube channel id" }, 400);
         const result = await ingestChannel(channelId);
+        return json(result);
+      },
+    },
+
+    "/api/ingest/:channelId/deep": {
+      POST: async (req) => {
+        const channelId = req.params.channelId;
+        if (!isYoutubeChannelId(channelId)) return json({ error: "Invalid YouTube channel id" }, 400);
+        const result = await deepIngestChannel(channelId);
         return json(result);
       },
     },
