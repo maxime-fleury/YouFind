@@ -136,7 +136,12 @@ function showToast(message, type = "info") {
 }
 
 function formatStatCount(value) {
-  return Number(value || 0).toLocaleString("fr-FR");
+  const n = Number(value || 0);
+  if (n < 1000) return String(n);
+  // Compact style: 1 décimale + unité (ex. 11,7k+). Le séparateur décimal est
+  // une virgule (fr-FR). Le "+" signale que la valeur est arrondie.
+  if (n < 999500) return (n / 1000).toFixed(1).replace(".", ",") + "k+";
+  return (n / 1_000_000).toFixed(1).replace(".", ",") + "M+";
 }
 
 function renderStatsLoading(container) {
