@@ -2121,6 +2121,51 @@ function updateRelatedProgress(data) {
   }
 }
 
+// Run a single pass of the related exploration, streaming results into the
+// results container. Returns { found, lastStatus } once the pass completes.
+async function runRelatedPass({ status, results, passLabel }) {
+  let cursor = 0;
+  let lastStatus = null;
+  let jobId = "";
+  let pollFailures = 0;
+  const pollingDeadline = Date.now() + 2 * 60 * 60 * 1000;
+
+  const started = await api("/discover/related", { method: "POST", timeout: 30000 });
+  jobId = started.jobId || "";
+  if (!jobId) throw new Error("Impossible d'identifier l'exploration");
+
+  while (Date.now() < pollingDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    let data;
+    try {
+      data = await api(`/discover/related/status?job=${encodeURIComponent(jobId)}&since=${cursor}`, { timeout: 30000 });
+      pollFailures = 0;
+    } catch (err) {
+      pollFailures++;
+      if (pollFailures >= 10) throw err;
+      status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${pollFailures}/10)</span>`;
+      continue;
+    }
+    lastStatus = data;
+    updateRelatedProgress(data);
+
+    if (Array.isArray(data.results) && data.results.length > 0) {
+      results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
+      cursor = data.next;
+      status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${passLabel ? `Passage ${passLabel} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+    }
+
+    if (data.status === "done") {
+      return { found: Number(data.found) || 0, lastStatus: data };
+    }
+    if (data.status === "error") {
+      throw new Error(data.error || "Erreur pendant la découverte");
+    }
+  }
+
+  throw new Error("Le suivi a expiré après deux heures, mais la découverte peut continuer sur le serveur.");
+}
+
 async function runRelatedDiscovery() {
   if (isRelatedRunning) return showToast("Deja en cours...", "info");
   isRelatedRunning = true;
@@ -2130,6 +2175,9 @@ async function runRelatedDiscovery() {
   const results = document.getElementById("related-results");
   const badge = document.getElementById("related-badge");
 
+  const runsInput = document.getElementById("related-runs");
+  const totalRuns = Math.max(1, Math.min(10, parseInt(runsInput?.value || "1", 10) || 1));
+
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-glass"></span> Exploration...';
   status.innerHTML = "";
@@ -2138,54 +2186,28 @@ async function runRelatedDiscovery() {
   document.getElementById("related-progress")?.classList.remove("d-none");
   updateRelatedProgress({ status: "running", total: 0, completed: 0, found: 0 });
 
-  let cursor = 0;
   let lastStatus = null;
-  let jobId = "";
-  let pollFailures = 0;
-  const pollingDeadline = Date.now() + 2 * 60 * 60 * 1000;
 
   try {
-    const started = await api("/discover/related", { method: "POST", timeout: 30000 });
-    jobId = started.jobId || "";
-    if (!jobId) throw new Error("Impossible d'identifier l'exploration");
-
-    while (Date.now() < pollingDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      let data;
-      try {
-        data = await api(`/discover/related/status?job=${encodeURIComponent(jobId)}&since=${cursor}`, { timeout: 30000 });
-        pollFailures = 0;
-      } catch (err) {
-        pollFailures++;
-        if (pollFailures >= 10) throw err;
-        status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${pollFailures}/10)</span>`;
-        continue;
-      }
-      lastStatus = data;
-      updateRelatedProgress(data);
-
-      if (Array.isArray(data.results) && data.results.length > 0) {
-        results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
-        cursor = data.next;
-        status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+    for (let run = 1; run <= totalRuns; run++) {
+      const passLabel = totalRuns > 1 ? `${run} / ${totalRuns}` : "";
+      if (passLabel) {
+        status.innerHTML = `<span class="related-live-status"><i class="bi bi-repeat"></i> Passage ${passLabel} — exploration en cours...</span>`;
       }
 
-      if (data.status === "done") {
-        if (!data.found) {
-          status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
-        }
-        loadStats();
-        scoreAllUnscored("related-score");
-        return;
-      }
-      if (data.status === "error") {
-        throw new Error(data.error || "Erreur pendant la découverte");
+      const pass = await runRelatedPass({ status, results, passLabel });
+      lastStatus = pass.lastStatus;
+
+      // A pass that found nothing new won't be helped by another pass.
+      if (pass.found === 0) {
+        status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
+        break;
       }
     }
-
-    throw new Error("Le suivi a expiré après deux heures, mais la découverte peut continuer sur le serveur.");
+    loadStats();
+    scoreAllUnscored("related-score");
   } catch (err) {
-    updateRelatedProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, found: cursor });
+    updateRelatedProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, found: 0 });
     status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> ${escapeHtml(err.message)}</span>`;
   } finally {
     isRelatedRunning = false;

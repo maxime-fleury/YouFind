@@ -265,6 +265,10 @@
         <h2 class="section-title"><i class="bi bi-diagram-3"></i> Chaines similaires</h2>
         <div class="d-flex gap-2 align-items-center">
           <span id="related-badge" class="status-badge pending" style="display:none">Français seulement</span>
+          <div class="d-flex align-items-center gap-2">
+            <label for="related-runs" class="text-muted" style="font-size:0.82rem;white-space:nowrap">Passages</label>
+            <input type="number" id="related-runs" class="form-control form-control-glass" value="1" min="1" max="10" step="1" style="width:70px" title="Nombre de passages de l'exploration : à la fin, elle repart du début">
+          </div>
           <button class="btn btn-primary-glass" onclick="runRelatedDiscovery()" id="related-btn">
             <i class="bi bi-search"></i> Explorer les similaires
           </button>
