@@ -295,6 +295,21 @@ function parseViewCount(text) {
   return Math.round(n);
 }
 
+function parseDurationToSeconds(text) {
+  if (!text) return 0;
+  const t = String(text).trim();
+  if (!t || t.toLowerCase().includes("live")) return 0;
+  const parts = t.split(":");
+  if (parts.length < 2 || parts.length > 3) return 0;
+  let secs = 0;
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0) return 0;
+    secs = secs * 60 + n;
+  }
+  return secs;
+}
+
 function parseRelativeTime(text) {
   if (!text) return null;
   const t = text.toLowerCase().trim();
@@ -370,6 +385,10 @@ function parseGridVideo(item) {
     let publishedTime = "";
     if (r.publishedTimeText?.simpleText) publishedTime = r.publishedTimeText.simpleText;
 
+    // Duration is available for free in the page HTML (e.g. "12:34") — no
+    // need to fetch each video page individually.
+    const duration = parseDurationToSeconds(r.lengthText?.simpleText);
+
     return {
       videoId: r.videoId,
       titre: title,
@@ -378,7 +397,7 @@ function parseGridVideo(item) {
       description: "",
       thumbnail,
       vues: parseViewCount(viewsText),
-      duration: 0,
+      duration,
     };
   }
 
@@ -407,6 +426,24 @@ function parseGridVideo(item) {
   const viewsText = parts[0]?.text?.content || "";
   const publishedTime = parts[1]?.text?.content || "";
 
+  // Duration from the thumbnail overlay badge (e.g. "12:34"). Fall back to any
+  // duration-shaped string in the payload; requiring 2-digit seconds avoids
+  // false positives like aspect ratios ("16:9").
+  let duration = 0;
+  const overlays = lockup.contentImage?.thumbnailViewModel?.overlays || [];
+  for (const ov of overlays) {
+    const badges = ov?.thumbnailBottomOverlayViewModel?.badges || [];
+    for (const badge of badges) {
+      const d = parseDurationToSeconds(badge?.thumbnailBadgeViewModel?.text);
+      if (d > 0) { duration = d; break; }
+    }
+    if (duration > 0) break;
+  }
+  if (!duration) {
+    const m = JSON.stringify(lockup).match(/"(\d+:\d{2}(?::\d{2})?)"/);
+    if (m) duration = parseDurationToSeconds(m[1]);
+  }
+
   return {
     videoId,
     titre: title,
@@ -415,7 +452,7 @@ function parseGridVideo(item) {
     description: "",
     thumbnail,
     vues: parseViewCount(viewsText),
-    duration: 0,
+    duration,
   };
 }
 
@@ -548,7 +585,11 @@ export async function scrapeChannelVideos(channelId, maxResults = 100) {
     let token = extractContinuation(data);
     let fetched = 0;
 
-    while (videos.length < maxResults && token && fetched < 10) {
+    // Scale the continuation budget with the target: each fetch yields ~30
+    // videos, so a deep crawl (e.g. maxResults=500) needs more rounds than a
+    // shallow one. +2 leaves headroom for pages that parse fewer items.
+    const maxFetches = Math.ceil(maxResults / 25) + 2;
+    while (videos.length < maxResults && token && fetched < maxFetches) {
       const contData = await fetchContinuation(token, apiKey);
       if (!contData) break;
       const newVideos = extractContinuationVideos(contData);

@@ -1,6 +1,6 @@
 import { join, dirname, resolve, relative } from "path";
 import { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts } from "./db.js";
-import { ingestChannel, refreshAllChannels } from "./rss.js";
+import { ingestChannel, refreshAllChannels, refreshAllVideos } from "./rss.js";
 import { discoverFromTopic, getQuotaUsage, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
@@ -85,6 +85,7 @@ function serveStatic(pathname) {
 }
 
 let isRefreshingRSS = false;
+let isRefreshingVideos = false;
 let isRefreshingStats = false;
 let isScoring = false;
 let scoringJobId = null;
@@ -102,6 +103,7 @@ const scoringProgress = {
 let isRelatedRunning = false;
 let relatedJobId = null;
 const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
+const refreshVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const relatedProgress = {
   total: 0,
   completed: 0,
@@ -560,6 +562,40 @@ const server = Bun.serve({
 
     "/api/refresh/status": {
       GET: () => json(refreshProgress),
+    },
+
+    "/api/refresh-videos": {
+      POST: async () => {
+        if (isRefreshingVideos) {
+          return json({ ok: true, message: "Refresh already in progress" });
+        }
+        isRefreshingVideos = true;
+        refreshVideosProgress.total = 0;
+        refreshVideosProgress.completed = 0;
+        refreshVideosProgress.errors = 0;
+        refreshVideosProgress.current = "";
+        refreshVideosProgress.status = "running";
+        refreshAllVideos((p) => {
+          refreshVideosProgress.total = p.total;
+          if (p.status === "done") refreshVideosProgress.completed++;
+          else if (p.status === "error") refreshVideosProgress.errors++;
+          refreshVideosProgress.current = p.nom;
+        })
+          .then((results) => {
+            refreshVideosProgress.status = "done";
+            console.log(`[RefreshVideos] Completed: ${results.length} channels`);
+          })
+          .catch((e) => {
+            refreshVideosProgress.status = "error";
+            console.error("[RefreshVideos] Error:", e.message);
+          })
+          .finally(() => { isRefreshingVideos = false; });
+        return json({ ok: true, message: "Full video refresh started in background" });
+      },
+    },
+
+    "/api/refresh-videos/status": {
+      GET: () => json(refreshVideosProgress),
     },
 
     "/api/channels/refresh-stats": {

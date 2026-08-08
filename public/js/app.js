@@ -673,7 +673,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
                   : ""
           }
           <div class="ch-actions-row">
-            <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}','_blank')" title="Voir sur YouTube">
+            <button class="btn btn-sm-glass btn-sm" onclick="window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos','_blank')" title="Voir les vidéos sur YouTube">
               <i class="bi bi-youtube"></i> Voir
             </button>
           </div>
@@ -1271,14 +1271,26 @@ async function refreshAllChannelStats() {
 }
 
 async function refreshRSS() {
-  const btn = document.getElementById("btn-refresh-rss");
+  return runRefreshJob("rss");
+}
+
+async function refreshVideos() {
+  return runRefreshJob("videos");
+}
+
+async function runRefreshJob(mode) {
+  const isVideos = mode === "videos";
+  const startPath = isVideos ? "/refresh-videos" : "/refresh";
+  const statusPath = isVideos ? "/refresh-videos/status" : "/refresh/status";
+  const btnId = isVideos ? "btn-refresh-videos" : "btn-refresh-rss";
+  const btn = document.getElementById(btnId);
   const icon = btn?.querySelector(".btn-icon");
   icon?.classList.add("spinning");
   btn?.setAttribute("disabled", "true");
   btn?.setAttribute("aria-busy", "true");
 
   try {
-    await api("/refresh", { method: "POST" });
+    await api(startPath, { method: "POST" });
   } catch (err) {
     showToast("Erreur lors du demarrage du refresh", "error");
     icon?.classList.remove("spinning");
@@ -1301,7 +1313,7 @@ async function refreshRSS() {
   while (!done && Date.now() < pollDeadline) {
     await new Promise((r) => setTimeout(r, 1500));
     try {
-      status = await api("/refresh/status");
+      status = await api(statusPath);
     } catch { continue; }
 
     const pct = status.total > 0 ? Math.round((status.completed / status.total) * 100) : 0;
@@ -1347,13 +1359,13 @@ async function refreshRSS() {
   btn?.removeAttribute("aria-busy");
 }
 
-async function watchRefreshInBackground({ btn, icon, banner, bar, count, detail }) {
+async function watchRefreshInBackground({ statusPath, btn, icon, banner, bar, count, detail }) {
   const watcherDeadline = Date.now() + 2 * 60 * 60 * 1000;
   while (Date.now() < watcherDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
     let status;
     try {
-      status = await api("/refresh/status");
+      status = await api(statusPath);
     } catch {
       continue;
     }
@@ -2220,7 +2232,7 @@ async function openChannelDetail(id) {
     document.getElementById("detail-ch-thumb").src = ch.thumbnail || "";
     document.getElementById("detail-ch-name").textContent = ch.nom;
     document.getElementById("detail-ch-meta").textContent = `${formatNumber(ch.subscriber_count)} abonnes | ${ch.status}`;
-    document.getElementById("detail-ch-link").href = `https://youtube.com/channel/${safeChannelId(ch.channel_id)}`;
+    document.getElementById("detail-ch-link").href = `https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos`;
 
     if (ch.llm_summary) {
       document.getElementById("detail-ch-summary").innerHTML = `

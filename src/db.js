@@ -42,6 +42,10 @@ db.run(`
 // Migration: add duration column for existing databases
 try { db.run("ALTER TABLE videos ADD COLUMN duration INTEGER DEFAULT 0"); } catch {}
 
+// Migration: track last RSS refresh per channel so the bulk refresh can skip
+// channels that were refreshed moments ago (nothing new can have appeared).
+try { db.run("ALTER TABLE channels ADD COLUMN last_refresh TEXT"); } catch {}
+
 db.run(`
   CREATE TABLE IF NOT EXISTS topics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -321,6 +325,7 @@ const stmts = {
   getVideosByChannel: db.prepare(`SELECT v.* FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE v.channel_id = ? AND c.status = 'validated' AND v.duration > 60 ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
   getVideoByUrl: db.prepare(`SELECT id, duration FROM videos WHERE url = ?`),
   updateVideoDuration: db.prepare(`UPDATE videos SET duration = $duration WHERE url = $url`),
+  updateChannelLastRefresh: db.prepare(`UPDATE channels SET last_refresh = ? WHERE channel_id = ?`),
 
   insertTopic: db.prepare(`INSERT INTO topics (nom, description) VALUES ($nom, $description)`),
   getAllTopics: db.prepare(`SELECT * FROM topics ORDER BY date_ajout DESC`),

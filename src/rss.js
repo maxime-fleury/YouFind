@@ -1,4 +1,4 @@
-import { stmts } from "./db.js";
+import { db, stmts } from "./db.js";
 import { scrapeChannelVideos, isShortByText } from "./youtube-api.js";
 import { runWithLimit } from "./utils.js";
 
@@ -139,13 +139,32 @@ export async function fetchChannelFeed(channelId) {
 
 
 
-export async function ingestChannel(channelId) {
+export async function ingestChannel(channelId, { maxVideos = 0 } = {}) {
+  // Deep-crawl a brand-new channel (100 videos). For re-refreshes the newest
+  // uploads are always in the latest ~30, so skip the expensive continuation
+  // fetches and only grab the first page. An explicit maxVideos (e.g. the
+  // full-catalog refresh) overrides both defaults.
+  const hasExistingVideos = !!db.query(`SELECT 1 FROM videos WHERE channel_id = ? LIMIT 1`).get(channelId);
+  if (!maxVideos) maxVideos = hasExistingVideos ? 30 : 100;
+
   // Try free scraping first; fall back to RSS if scraping fails
-  let entries = await scrapeChannelVideos(channelId, 100);
+  let entries = await scrapeChannelVideos(channelId, maxVideos);
   let source = "scrape";
   if (!entries.length) {
     entries = await fetchChannelFeed(channelId);
     source = "rss";
+  }
+
+  // Resolve durations in bulk. Entries scraped from the channel page already
+  // carry their duration (parsed from lengthText). For anything left over
+  // (RSS fallback), one extra page fetch fills a videoId → duration map
+  // instead of one HTTP request per video.
+  let durationMap = null;
+  if (entries.some((e) => !e.duration)) {
+    const pageVideos = await scrapeChannelVideos(channelId, 30);
+    durationMap = new Map(
+      pageVideos.filter((v) => v.duration > 0).map((v) => [v.videoId, v.duration])
+    );
   }
 
   // Filter obvious Shorts by text immediately
@@ -156,18 +175,20 @@ export async function ingestChannel(channelId) {
   let durUpdated = 0;
   let skippedDurationShorts = 0;
 
-  // Scrape duration with limited concurrency (5 parallel) so 100 videos don't take forever
+  // Mostly local DB work now — durations come from the page scrape itself.
   await runWithLimit(
     filtered,
     async (entry) => {
       const existing = stmts.getVideoByUrl.get(entry.url);
 
-      // Scrape duration for videos missing it (new or old)
-      let dur = 0;
-      if (!existing || !existing.duration) {
-        dur = await scrapeVideoDuration(entry.url);
-      } else {
+      // Use the duration parsed from the channel page when available; only fall
+      // back to a per-video fetch when no page could be parsed at all.
+      let dur = entry.duration || 0;
+      if (existing?.duration) {
         dur = existing.duration;
+      } else if (!dur) {
+        if (durationMap) dur = durationMap.get(entry.videoId) || 0;
+        if (!dur && !durationMap) dur = await scrapeVideoDuration(entry.url);
       }
 
       // Exclude Shorts as soon as we know the duration
@@ -203,18 +224,72 @@ export async function ingestChannel(channelId) {
   return { total: entries.length, added, durUpdated, source };
 }
 
+// Channels refreshed more recently than this are skipped by the bulk refresh:
+// nothing new can have been published in between, and it keeps repeated manual
+// refreshes (e.g. right after the daily cron run) near-instant.
+const REFRESH_SKIP_WINDOW_MS = 30 * 60 * 1000;
+
+// Full-catalog crawl: fetch up to this many videos per channel (vs 30-100 for
+// the regular refresh). Most channels have fewer than 500, so in practice this
+// grabs their whole backlog.
+const DEEP_REFRESH_MAX_VIDEOS = 500;
+
+export async function refreshAllVideos(onProgress) {
+  const channels = stmts.getChannelsByStatus.all("validated");
+  const results = [];
+  const total = channels.length;
+  let refreshed = 0;
+
+  // No freshness skip here: the user asked for the full catalog explicitly.
+  // Lower concurrency than the RSS refresh because each channel does a deep crawl.
+  await runWithLimit(
+    channels,
+    async (ch, idx) => {
+      console.log(`[RSS] Deep refresh ${ch.nom} (${ch.channel_id})...`);
+      if (onProgress) onProgress({ current: idx, total, nom: ch.nom, status: "running" });
+      try {
+        const result = await ingestChannel(ch.channel_id, { maxVideos: DEEP_REFRESH_MAX_VIDEOS });
+        refreshed++;
+        stmts.updateChannelLastRefresh.run(String(Date.now()), ch.channel_id);
+        results.push({ channel: ch.nom, ...result });
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", result });
+      } catch (e) {
+        console.error(`[RSS] Error deep-refreshing ${ch.nom}:`, e.message);
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "error", error: e.message });
+      }
+    },
+    3,
+    300
+  );
+
+  console.log(`[RSS] Deep refresh done: ${refreshed} channels.`);
+  return results;
+}
+
 async function refreshAllChannelsImpl(onProgress) {
   const channels = stmts.getChannelsByStatus.all("validated");
   const results = [];
   const total = channels.length;
+  let refreshed = 0;
+  let skipped = 0;
 
   await runWithLimit(
     channels,
     async (ch, idx) => {
+      const lastRefresh = Number(ch.last_refresh);
+      if (ch.last_refresh && Number.isFinite(lastRefresh) && Date.now() - lastRefresh < REFRESH_SKIP_WINDOW_MS) {
+        skipped++;
+        results.push({ channel: ch.nom, skipped: true });
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", skipped: true });
+        return;
+      }
+
       console.log(`[RSS] Refreshing ${ch.nom} (${ch.channel_id})...`);
       if (onProgress) onProgress({ current: idx, total, nom: ch.nom, status: "running" });
       try {
         const result = await ingestChannel(ch.channel_id);
+        refreshed++;
+        stmts.updateChannelLastRefresh.run(String(Date.now()), ch.channel_id);
         results.push({ channel: ch.nom, ...result });
         if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", result });
       } catch (e) {
@@ -222,11 +297,11 @@ async function refreshAllChannelsImpl(onProgress) {
         if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "error", error: e.message });
       }
     },
-    3,
-    500
+    5,
+    200
   );
 
-  console.log(`[RSS] Refreshed ${channels.length} channels.`);
+  console.log(`[RSS] Refreshed ${refreshed} channels, skipped ${skipped} (recently refreshed).`);
   return results;
 }
 

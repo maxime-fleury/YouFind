@@ -82,8 +82,11 @@
       <div class="videos-header mb-4">
         <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
           <h2 class="section-title mb-0"><i class="bi bi-camera-reels"></i> Vidéos récentes</h2>
-          <button class="btn btn-primary-glass" id="btn-refresh-rss" onclick="refreshRSS()">
+          <button class="btn btn-primary-glass" id="btn-refresh-rss" onclick="refreshRSS()" title="Récupère les dernières vidéos des chaînes validées">
             <i class="bi bi-arrow-clockwise btn-icon"></i> Refresh RSS
+          </button>
+          <button class="btn btn-primary-glass" id="btn-refresh-videos" onclick="refreshVideos()" title="Récupère toutes les vidéos des chaînes validées (peut être long)">
+            <i class="bi bi-cloud-download-fill btn-icon"></i> Refresh Videos
           </button>
         </div>
       </div>
