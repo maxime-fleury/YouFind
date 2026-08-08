@@ -501,8 +501,13 @@ function getTabContentItems(videoTab) {
 
 function getTabContinuations(videoTab) {
   const content = videoTab?.tabRenderer?.content;
-  // New layout: richGridRenderer continuations
+  // Current layout: richGridRenderer.continuations is usually empty — the token
+  // lives in the last contents item as a continuationItemRenderer instead.
   if (content?.richGridRenderer?.continuations) return content.richGridRenderer.continuations;
+  if (content?.richGridRenderer?.contents) {
+    const last = content.richGridRenderer.contents[content.richGridRenderer.contents.length - 1];
+    if (last?.continuationItemRenderer) return [last.continuationItemRenderer];
+  }
   // Old layout: sectionListRenderer continuations
   const sections = content?.sectionListRenderer?.contents || [];
   for (const section of sections) {
@@ -537,6 +542,7 @@ function extractContinuation(data) {
     for (const c of continuations) {
       if (c.nextContinuationData?.continuation) return c.nextContinuationData.continuation;
       if (c.button?.buttonRenderer?.command?.continuationCommand?.token) return c.button.buttonRenderer.command.continuationCommand.token;
+      if (c.continuationEndpoint?.continuationCommand?.token) return c.continuationEndpoint.continuationCommand.token;
     }
   } catch {}
   return null;
