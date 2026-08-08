@@ -223,6 +223,20 @@ function extractFromHTML(html) {
   let name = nameMatch?.[1] || "";
   name = decodeHtmlEntities(name).replace(/\s*-\s*YouTube\s*$/, "").trim();
 
+  let description = "";
+  const dataMatch = html.match(/var ytInitialData = ({[\s\S]*?});<\/script>/);
+  if (dataMatch) {
+    try {
+      const data = JSON.parse(dataMatch[1]);
+      description = data?.metadata?.channelMetadataRenderer?.description || "";
+    } catch {}
+  }
+  if (!description) {
+    const metaDesc = html.match(/<meta\s+name="description"\s+content="([^"]+)"/i);
+    if (metaDesc) description = decodeHtmlEntities(metaDesc[1]);
+  }
+  description = description.replace(/\s+/g, " ").trim().slice(0, 1000);
+
   const thumbMatch = html.match(/"avatar"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+)"/);
   const thumbnail = thumbMatch?.[1] || "";
 
@@ -251,18 +265,18 @@ function extractFromHTML(html) {
     }
   }
 
-  return { channelId, name, thumbnail, subscriberCount };
+  return { channelId, name, thumbnail, subscriberCount, description };
 }
 
 // Scrape channel page for stats — FREE, zero API cost
 export async function scrapeChannelInfo(channelId) {
   try {
     const html = await fetchPageText(`https://www.youtube.com/channel/${channelId}`);
-    if (!html) return { subscriberCount: 0, thumbnail: "", name: "" };
+    if (!html) return { subscriberCount: 0, thumbnail: "", name: "", description: "" };
     const data = extractFromHTML(html);
-    return { subscriberCount: data.subscriberCount, thumbnail: data.thumbnail, name: data.name || "" };
+    return { subscriberCount: data.subscriberCount, thumbnail: data.thumbnail, name: data.name || "", description: data.description || "" };
   } catch {
-    return { subscriberCount: 0, thumbnail: "", name: "" };
+    return { subscriberCount: 0, thumbnail: "", name: "", description: "" };
   }
 }
 
@@ -751,6 +765,7 @@ export async function discoverFromTopic(topicQuery, maxResults = 20, offset = 0)
         $subscriber_count: ch.subscriberCount,
         $last_video_date: null,
         $thumbnail: ch.thumbnail,
+        $description: ch.description || "",
       });
       inserted.push(ch);
     }
@@ -799,6 +814,7 @@ export async function discoverFromTopic(topicQuery, maxResults = 20, offset = 0)
       $subscriber_count: ch.subscriberCount,
       $last_video_date: ch.lastVideoDate,
       $thumbnail: ch.thumbnail,
+      $description: ch.description || "",
     });
     inserted.push(ch);
   }
@@ -852,6 +868,7 @@ export async function scrapeDiscoverChannels(query, maxResults = 20) {
         if (data.name) ch.nom = data.name;
         if (data.thumbnail) ch.thumbnail = data.thumbnail;
         if (data.subscriberCount) ch.subscriberCount = data.subscriberCount;
+        if (data.description) ch.description = data.description;
       }
     } catch { /* keep going */ }
 
@@ -1137,6 +1154,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult) {
             rc.nom = data.name || rc.nom;
             rc.thumbnail = data.thumbnail || rc.thumbnail;
             rc.subscriberCount = data.subscriberCount;
+            rc.description = data.description || "";
             if (!isLikelyFrench(html)) continue;
           }
         } catch { continue; }
@@ -1151,6 +1169,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult) {
           $subscriber_count: rc.subscriberCount || 0,
           $last_video_date: null,
           $thumbnail: rc.thumbnail || "",
+          $description: rc.description || "",
         });
         onResult?.(rc);
       }

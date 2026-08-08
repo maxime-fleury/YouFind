@@ -20,7 +20,8 @@ db.run(`
     last_video_date TEXT,
     llm_summary TEXT,
     llm_score REAL,
-    thumbnail TEXT
+    thumbnail TEXT,
+    description TEXT
   );
 `);
 
@@ -45,6 +46,10 @@ try { db.run("ALTER TABLE videos ADD COLUMN duration INTEGER DEFAULT 0"); } catc
 // Migration: track last RSS refresh per channel so the bulk refresh can skip
 // channels that were refreshed moments ago (nothing new can have appeared).
 try { db.run("ALTER TABLE channels ADD COLUMN last_refresh TEXT"); } catch {}
+
+// Migration: store the channel description so scoring can fall back to it
+// when a channel has no videos yet (e.g. freshly discovered on the Similaires page).
+try { db.run("ALTER TABLE channels ADD COLUMN description TEXT"); } catch {}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS topics (
@@ -294,14 +299,20 @@ initSettings();
 
 const stmts = {
   insertChannel: db.prepare(`
-    INSERT OR IGNORE INTO channels (nom, channel_id, subscriber_count, last_video_date, thumbnail)
-    VALUES ($nom, $channel_id, $subscriber_count, $last_video_date, $thumbnail)
+    INSERT OR IGNORE INTO channels (nom, channel_id, subscriber_count, last_video_date, thumbnail, description)
+    VALUES ($nom, $channel_id, $subscriber_count, $last_video_date, $thumbnail, $description)
   `),
 
   getChannelByYoutubeId: db.prepare(`SELECT * FROM channels WHERE channel_id = ?`),
   getChannelsByStatus: db.prepare(`SELECT * FROM channels WHERE status = ? ORDER BY date_ajout DESC`),
   getAllChannels: db.prepare(`SELECT * FROM channels ORDER BY date_ajout DESC`),
   getPendingChannels: db.prepare(`SELECT * FROM channels WHERE status = 'pending' ORDER BY llm_score DESC NULLS LAST`),
+  getPendingChannelsWithoutVideos: db.prepare(`
+    SELECT c.* FROM channels c
+    WHERE c.status = 'pending'
+      AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.channel_id = c.channel_id)
+    ORDER BY c.date_ajout DESC
+  `),
   getUnscoredChannels: db.prepare(`SELECT * FROM channels WHERE llm_score IS NULL ORDER BY date_ajout DESC`),
 
   updateChannelStatus: db.prepare(`UPDATE channels SET status = $status WHERE id = $id`),
@@ -310,7 +321,7 @@ const stmts = {
 
   updateChannelLLM: db.prepare(`UPDATE channels SET llm_score = $llm_score, llm_summary = $llm_summary WHERE id = $id`),
   updateChannelStats: db.prepare(`UPDATE channels SET subscriber_count = $subscriber_count, last_video_date = $last_video_date WHERE channel_id = $channel_id`),
-  refreshChannelInfo: db.prepare(`UPDATE channels SET nom = $nom, subscriber_count = $subscriber_count, thumbnail = $thumbnail WHERE channel_id = $channel_id`),
+  refreshChannelInfo: db.prepare(`UPDATE channels SET nom = $nom, subscriber_count = $subscriber_count, thumbnail = $thumbnail, description = $description WHERE channel_id = $channel_id`),
 
   deleteChannelVideos: db.prepare(`DELETE FROM videos WHERE channel_id = ?`),
   deleteChannelFeedback: db.prepare(`DELETE FROM feedback_log WHERE channel_id = ?`),

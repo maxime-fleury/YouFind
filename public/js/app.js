@@ -635,7 +635,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
             <span><i class="bi bi-people"></i> ${formatNumber(ch.subscriber_count)} abonnes</span>
             <span><i class="bi bi-calendar3"></i> ${formatDate(ch.date_ajout)}</span>
           </div>
-          ${ch.llm_summary ? `<div class="llm-summary">${escapeHtml(ch.llm_summary)}</div>` : ""}
+          ${ch.llm_summary || ch.description ? `<div class="llm-summary${ch.llm_summary ? "" : " fallback"}">${escapeHtml(ch.llm_summary || ch.description)}</div>` : ""}
           ${ch.raison_rejet ? `<div class="mt-1" style="font-size:0.78rem;color:var(--accent-red)"><i class="bi bi-x-circle"></i> ${escapeHtml(ch.raison_rejet)}</div>` : ""}
           <div class="d-flex align-items-center gap-2 mt-2" style="flex-wrap:wrap">
             <div id="ch-topics-${ch.id}"></div>
@@ -1283,11 +1283,16 @@ async function refreshVideos() {
   return runRefreshJob("videos");
 }
 
+async function refreshPendingVideos() {
+  return runRefreshJob("pending-videos");
+}
+
 async function runRefreshJob(mode) {
   const isVideos = mode === "videos";
-  const startPath = isVideos ? "/refresh-videos" : "/refresh";
-  const statusPath = isVideos ? "/refresh-videos/status" : "/refresh/status";
-  const btnId = isVideos ? "btn-refresh-videos" : "btn-refresh-rss";
+  const isPendingVideos = mode === "pending-videos";
+  const startPath = isVideos ? "/refresh-videos" : isPendingVideos ? "/refresh-pending-videos" : "/refresh";
+  const statusPath = isVideos ? "/refresh-videos/status" : isPendingVideos ? "/refresh-pending-videos/status" : "/refresh/status";
+  const btnId = isVideos ? "btn-refresh-videos" : isPendingVideos ? "btn-refresh-pending-videos" : "btn-refresh-rss";
   const btn = document.getElementById(btnId);
   const icon = btn?.querySelector(".btn-icon");
   icon?.classList.add("spinning");
@@ -1339,7 +1344,7 @@ async function runRefreshJob(mode) {
     detail.textContent = status
       ? "Refresh toujours en cours — suivi en arrière-plan"
       : "Connexion interrompue — suivi en arrière-plan";
-    watchRefreshInBackground({ btn, icon, banner, bar, count, detail });
+    watchRefreshInBackground({ statusPath, mode, btn, icon, banner, bar, count, detail });
     return;
   }
 
@@ -1359,12 +1364,13 @@ async function runRefreshJob(mode) {
 
   loadVideos(true);
   loadStats();
+  if (isPendingVideos) loadChannels();
   icon?.classList.remove("spinning");
   btn?.removeAttribute("disabled");
   btn?.removeAttribute("aria-busy");
 }
 
-async function watchRefreshInBackground({ statusPath, btn, icon, banner, bar, count, detail }) {
+async function watchRefreshInBackground({ statusPath, mode, btn, icon, banner, bar, count, detail }) {
   const watcherDeadline = Date.now() + 2 * 60 * 60 * 1000;
   while (Date.now() < watcherDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -1392,6 +1398,7 @@ async function watchRefreshInBackground({ statusPath, btn, icon, banner, bar, co
     }, 3000);
     loadVideos(true);
     loadStats();
+    if (mode === "pending-videos") loadChannels();
     icon?.classList.remove("spinning");
     btn?.removeAttribute("disabled");
     btn?.removeAttribute("aria-busy");
@@ -2222,8 +2229,21 @@ async function quickReject(channelId, name, btn) {
 
 // --- Channel Detail Modal ---
 let currentDetailChannel = null;
+// Ordered queue of pending channels for the "valider/refuser + suivant" triage flow.
+let detailQueue = null; // [{ id, nom }] in pending-list order
+let detailQueueIndex = -1;
 
-async function openChannelDetail(id) {
+channelDetailModal._element.addEventListener("hidden.bs.modal", () => {
+  detailQueue = null;
+  detailQueueIndex = -1;
+});
+
+async function openChannelDetail(id, opts = {}) {
+  // Starting a fresh triage session unless we are advancing inside the queue.
+  if (!opts.keepQueue) {
+    detailQueue = null;
+    detailQueueIndex = -1;
+  }
   document.getElementById("detail-ch-name").textContent = "Chargement...";
   document.getElementById("detail-ch-meta").textContent = "";
   document.getElementById("detail-ch-summary").innerHTML = "";
@@ -2235,7 +2255,12 @@ async function openChannelDetail(id) {
   try {
     const data = await api(`/channels/${id}/detail`);
     const ch = data.channel;
-    currentDetailChannel = { id, channel_id: ch.channel_id };
+    currentDetailChannel = { id, channel_id: ch.channel_id, nom: ch.nom, status: ch.status };
+
+    // Triage buttons (valider/refuser + suivant) only make sense for pending channels.
+    const isPending = ch.status === "pending";
+    document.getElementById("btn-detail-accept-next")?.classList.toggle("d-none", !isPending);
+    document.getElementById("btn-detail-reject-next")?.classList.toggle("d-none", !isPending);
 
     // Reset the refresh button state in case a previous run left it disabled.
     const refreshBtn = document.getElementById("btn-detail-refresh-videos");
@@ -2248,11 +2273,12 @@ async function openChannelDetail(id) {
     document.getElementById("detail-ch-meta").textContent = `${formatNumber(ch.subscriber_count)} abonnes | ${ch.status}`;
     document.getElementById("detail-ch-link").href = `https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos`;
 
-    if (ch.llm_summary) {
+    const summaryText = ch.llm_summary || ch.description || "";
+    if (summaryText) {
       document.getElementById("detail-ch-summary").innerHTML = `
         <div class="glass-card p-3">
           <div class="llm-score ${ch.llm_score >= 70 ? 'high' : ch.llm_score >= 40 ? 'medium' : 'low'} mb-1">${ch.llm_score != null ? ch.llm_score + '/100' : "Non score"}</div>
-          <div class="llm-summary">${escapeHtml(ch.llm_summary)}</div>
+          <div class="llm-summary">${escapeHtml(summaryText)}</div>
         </div>`;
     }
 
@@ -2274,6 +2300,70 @@ async function openChannelDetail(id) {
   } catch (err) {
     document.getElementById("detail-ch-name").textContent = "Erreur";
     document.getElementById("detail-ch-related").innerHTML = `<div class="text-muted">${err.message}</div>`;
+  }
+}
+
+// Ordered list of pending channels, reusing the already-loaded list when the
+// channels page is currently filtered on pending.
+async function getPendingList() {
+  const filter = document.getElementById("channel-filter")?.value;
+  if (filter === "pending" && _allChannels.length) return _allChannels;
+  return await api("/channels?status=pending");
+}
+
+async function ensureDetailQueue() {
+  if (detailQueue) return;
+  const list = await getPendingList();
+  detailQueue = list.map((c) => ({ id: c.id, nom: c.nom }));
+  detailQueueIndex = detailQueue.findIndex((c) => c.id === currentDetailChannel?.id);
+}
+
+// Advance the modal to the next pending channel in the queue; close it when
+// the pending list is exhausted.
+async function showNextInQueue() {
+  await ensureDetailQueue();
+  const next = detailQueue[detailQueueIndex + 1];
+  if (!next) {
+    showToast("Plus de chaines en attente", "info");
+    channelDetailModal.hide();
+    return;
+  }
+  detailQueueIndex++;
+  await openChannelDetail(next.id, { keepQueue: true });
+}
+
+// Modal footer: validate the current channel, then open the next pending one.
+async function acceptCurrentAndNext() {
+  if (!currentDetailChannel) return;
+  try {
+    await ensureDetailQueue();
+    await api(`/channels/${currentDetailChannel.id}/validate`, { method: "POST" });
+    showToast("Chaine validee !", "success");
+    loadChannels();
+    loadStats();
+    await showNextInQueue();
+  } catch (err) {
+    showToast("Erreur: " + err.message, "error");
+  }
+}
+
+// Modal footer: reject the current channel with a preset reason, then open
+// the next pending one — no reject modal.
+async function openRejectAndNext() {
+  if (!currentDetailChannel) return;
+  const raison = "Pas interessant, hors topic";
+  try {
+    await ensureDetailQueue();
+    await api(`/channels/${currentDetailChannel.id}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ raison }),
+    });
+    showToast("Chaine rejetee: " + raison, "info");
+    loadChannels();
+    loadStats();
+    await showNextInQueue();
+  } catch (err) {
+    showToast("Erreur: " + err.message, "error");
   }
 }
 

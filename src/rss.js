@@ -272,6 +272,37 @@ export async function refreshAllVideos(onProgress) {
   return results;
 }
 
+// Deep-crawl only the pending channels that have no videos at all yet, so the
+// user can preview what they publish before deciding to accept or reject.
+export async function refreshPendingWithoutVideos(onProgress) {
+  const channels = stmts.getPendingChannelsWithoutVideos.all();
+  const results = [];
+  const total = channels.length;
+  let refreshed = 0;
+
+  await runWithLimit(
+    channels,
+    async (ch, idx) => {
+      console.log(`[RSS] Deep crawl pending ${ch.nom} (${ch.channel_id})...`);
+      if (onProgress) onProgress({ current: idx, total, nom: ch.nom, status: "running" });
+      try {
+        const result = await deepIngestChannel(ch.channel_id);
+        refreshed++;
+        results.push({ channel: ch.nom, ...result });
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "done", result });
+      } catch (e) {
+        console.error(`[RSS] Error deep-crawling pending ${ch.nom}:`, e.message);
+        if (onProgress) onProgress({ current: idx + 1, total, nom: ch.nom, status: "error", error: e.message });
+      }
+    },
+    3,
+    300
+  );
+
+  console.log(`[RSS] Pending deep crawl done: ${refreshed} channels.`);
+  return results;
+}
+
 async function refreshAllChannelsImpl(onProgress) {
   const channels = stmts.getChannelsByStatus.all("validated");
   const results = [];

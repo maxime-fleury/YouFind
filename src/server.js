@@ -1,6 +1,6 @@
 import { join, dirname, resolve, relative } from "path";
 import { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts } from "./db.js";
-import { ingestChannel, refreshAllChannels, refreshAllVideos, deepIngestChannel } from "./rss.js";
+import { ingestChannel, refreshAllChannels, refreshAllVideos, refreshPendingWithoutVideos, deepIngestChannel } from "./rss.js";
 import { discoverFromTopic, getQuotaUsage, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
@@ -86,6 +86,7 @@ function serveStatic(pathname) {
 
 let isRefreshingRSS = false;
 let isRefreshingVideos = false;
+let isRefreshingPendingVideos = false;
 let isRefreshingStats = false;
 let isScoring = false;
 let scoringJobId = null;
@@ -104,6 +105,7 @@ let isRelatedRunning = false;
 let relatedJobId = null;
 const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const refreshVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
+const pendingVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const relatedProgress = {
   total: 0,
   completed: 0,
@@ -453,6 +455,7 @@ const server = Bun.serve({
           $subscriber_count: info.subscriberCount,
           $last_video_date: null,
           $thumbnail: info.thumbnail || "",
+          $description: info.description || "",
         });
 
         // Auto-ingest recent videos from RSS feed (free)
@@ -607,6 +610,40 @@ const server = Bun.serve({
       GET: () => json(refreshVideosProgress),
     },
 
+    "/api/refresh-pending-videos": {
+      POST: async () => {
+        if (isRefreshingPendingVideos) {
+          return json({ ok: true, message: "Refresh already in progress" });
+        }
+        isRefreshingPendingVideos = true;
+        pendingVideosProgress.total = 0;
+        pendingVideosProgress.completed = 0;
+        pendingVideosProgress.errors = 0;
+        pendingVideosProgress.current = "";
+        pendingVideosProgress.status = "running";
+        refreshPendingWithoutVideos((p) => {
+          pendingVideosProgress.total = p.total;
+          if (p.status === "done") pendingVideosProgress.completed++;
+          else if (p.status === "error") pendingVideosProgress.errors++;
+          pendingVideosProgress.current = p.nom;
+        })
+          .then((results) => {
+            pendingVideosProgress.status = "done";
+            console.log(`[RefreshPendingVideos] Completed: ${results.length} channels`);
+          })
+          .catch((e) => {
+            pendingVideosProgress.status = "error";
+            console.error("[RefreshPendingVideos] Error:", e.message);
+          })
+          .finally(() => { isRefreshingPendingVideos = false; });
+        return json({ ok: true, message: "Pending video crawl started in background" });
+      },
+    },
+
+    "/api/refresh-pending-videos/status": {
+      GET: () => json(pendingVideosProgress),
+    },
+
     "/api/channels/refresh-stats": {
       POST: async () => {
         if (isRefreshingStats) {
@@ -626,6 +663,7 @@ const server = Bun.serve({
                     $nom: info.name || ch.nom,
                     $subscriber_count: info.subscriberCount || ch.subscriber_count,
                     $thumbnail: info.thumbnail || ch.thumbnail,
+                    $description: info.description || ch.description || "",
                     $channel_id: ch.channel_id,
                   });
                   updated++;
@@ -789,6 +827,9 @@ const server = Bun.serve({
           (result) => {
             relatedProgress.results.push(result);
             relatedProgress.found = relatedProgress.results.length;
+            // Auto-ingest videos (free) so newly found channels have videos right
+            // away, matching the Discover page workflow.
+            ingestChannel(result.channelId).catch(() => {});
           }
         )
           .then(() => {
@@ -889,6 +930,7 @@ const server = Bun.serve({
               $subscriber_count: info.subscriberCount,
               $last_video_date: null,
               $thumbnail: info.thumbnail || "",
+              $description: info.description || "",
             });
             results.added++;
             const ch = stmts.getChannelByYoutubeId.get(channelId);

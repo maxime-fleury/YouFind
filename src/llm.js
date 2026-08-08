@@ -28,15 +28,18 @@ function buildPrompt(topics, videos, feedbackHistory, opts = {}) {
   const maxFeedback = opts.maxFeedback || 10;
   const trimmedFeedback = feedbackHistory.slice(0, maxFeedback);
 
-  let prompt = `Tu es un evaluateur de chaines YouTube. Note la qualite generale d'une chaine.
+  let prompt = `Tu es un evaluateur de chaines YouTube. Note la qualite generale d'une chaine.\n`;
 
-VIDEOS RECENTES DE CETTE CHAINE:
-`;
-  for (const v of videos) {
-    prompt += `- "${sanitizeUnicode(v.titre)}" (${v.vues?.toLocaleString() || 0} vues)\n`;
-    if (v.description) {
-      prompt += `  Resume: ${safeTruncate(v.description, maxDesc)}\n`;
+  if (videos.length > 0) {
+    prompt += `\nVIDEOS RECENTES DE CETTE CHAINE:\n`;
+    for (const v of videos) {
+      prompt += `- "${sanitizeUnicode(v.titre)}" (${v.vues?.toLocaleString() || 0} vues)\n`;
+      if (v.description) {
+        prompt += `  Resume: ${safeTruncate(v.description, maxDesc)}\n`;
+      }
     }
+  } else if (opts.channelDesc) {
+    prompt += `\nDESCRIPTION DE LA CHAINE (aucune video disponible):\n${safeTruncate(opts.channelDesc, 1000)}\n`;
   }
 
   if (trimmedFeedback.length > 0) {
@@ -225,20 +228,24 @@ export async function scoreChannel(channelId) {
     videos = await getChannelVideoSummaries(channelId, 5);
   }
   if (videos.length === 0) {
-    console.log(`[LLM] No videos found for "${channel.nom}", skipping`);
-    return null;
+    const channelDesc = (channel.description || "").trim();
+    if (!channelDesc) {
+      console.log(`[LLM] No videos or channel description found for "${channel.nom}", skipping`);
+      return null;
+    }
+    console.log(`[LLM] No videos for "${channel.nom}", falling back to channel description`);
   }
   videos = videos.map((v) => ({ ...v, description: v.description?.substring(0, 500) }));
 
   const feedbackHistory = stmts.getFeedbackForPrompt.all();
 
-  let prompt = truncatePrompt(buildPrompt(allTopics, videos, feedbackHistory));
+  let prompt = truncatePrompt(buildPrompt(allTopics, videos, feedbackHistory, { channelDesc: channel.description || "" }));
 
   try {
     const response = await callLLM(prompt).catch(async (err) => {
       if (err.message?.includes("422")) {
         console.warn(`[LLM] 422 for "${channel.nom}" — retrying with reduced context.`);
-        prompt = buildPrompt(allTopics, videos.slice(0, 2), feedbackHistory.slice(0, 3), { maxDesc: 100, maxFeedback: 3 });
+        prompt = buildPrompt(allTopics, videos.slice(0, 2), feedbackHistory.slice(0, 3), { maxDesc: 100, maxFeedback: 3, channelDesc: channel.description || "" });
         return callLLM(truncatePrompt(prompt, 3000));
       }
       throw err;

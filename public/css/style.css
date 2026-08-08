@@ -903,6 +903,14 @@ main, nav, .modal-content {
   white-space: pre-line;
 }
 
+/* Fallback channel description (no LLM summary yet) — clamp in list cards */
+.llm-summary.fallback {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .topic-card {
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);

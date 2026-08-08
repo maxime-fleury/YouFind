@@ -149,6 +149,9 @@
         <button class="btn btn-glass" onclick="refreshAllChannelStats()" id="refresh-stats-btn" title="Mettre a jour les stats de toutes les chaines">
           <i class="bi bi-arrow-clockwise"></i> Update stats
         </button>
+        <button class="btn btn-primary-glass" onclick="refreshPendingVideos()" id="btn-refresh-pending-videos" title="Récupère les vidéos des chaînes en attente qui n'en ont pas encore (deep crawl)">
+          <i class="bi bi-cloud-download-fill btn-icon"></i> Deep crawl pending
+        </button>
         <div class="btn-group">
           <button class="btn btn-glass dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Exporter toutes les chaines (nom + URL)">
             <i class="bi bi-download"></i> Exporter
@@ -566,6 +569,12 @@
           <div id="detail-ch-related"></div>
         </div>
         <div class="modal-footer border-0">
+          <button type="button" class="btn btn-success-glass d-none" id="btn-detail-accept-next" onclick="acceptCurrentAndNext()" title="Valider et ouvrir la chaîne suivante">
+            <i class="bi bi-arrow-right-circle"></i> Valider + suivant
+          </button>
+          <button type="button" class="btn btn-danger-glass d-none" id="btn-detail-reject-next" onclick="openRejectAndNext()" title="Refuser et ouvrir la chaîne suivante">
+            <i class="bi bi-x-lg"></i> Refuser + suivant
+          </button>
           <button type="button" class="btn btn-glass" data-bs-dismiss="modal">Fermer</button>
           <button type="button" class="btn btn-primary-glass" id="btn-detail-refresh-videos" onclick="refreshChannelVideos()" title="Récupère toutes les vidéos de cette chaîne (peut être long)">
             <i class="bi bi-cloud-download-fill btn-icon"></i> Refresh videos
