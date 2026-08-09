@@ -266,18 +266,32 @@
         <div class="d-flex gap-2 align-items-center">
           <span id="related-badge" class="status-badge pending" style="display:none">Français seulement</span>
           <div class="d-flex align-items-center gap-2">
+            <label for="related-statuses" class="text-muted" style="font-size:0.82rem;white-space:nowrap">Statuts</label>
+            <select id="related-statuses" class="form-select form-select-glass" multiple size="3" style="width:150px">
+              <option value="validated" selected>Validées</option>
+              <option value="pending">En attente</option>
+              <option value="rejected">Rejetées</option>
+            </select>
+          </div>
+          <div class="d-flex align-items-center gap-2">
             <label for="related-runs" class="text-muted" style="font-size:0.82rem;white-space:nowrap">Passages</label>
             <input type="number" id="related-runs" class="form-control form-control-glass" value="1" min="1" max="10" step="1" style="width:70px" title="Combien de fois chaque chaîne est explorée (Google propose des chaînes différentes à chaque visite)">
           </div>
           <button class="btn btn-primary-glass" onclick="runRelatedDiscovery()" id="related-btn">
             <i class="bi bi-search"></i> Explorer les similaires
           </button>
+          <button class="btn btn-warning-glass d-none" onclick="toggleRelatedPause()" id="related-pause-btn" title="Pause / Reprendre">
+            <i class="bi bi-pause-fill"></i> Pause
+          </button>
+          <button class="btn btn-danger-glass d-none" onclick="cancelRelatedDiscovery()" id="related-cancel-btn" title="Annuler l'exploration">
+            <i class="bi bi-stop-fill"></i> Annuler
+          </button>
         </div>
       </div>
       <div class="glass-card p-4 mb-4" id="related-info">
         <p class="text-muted mb-0">
           <i class="bi bi-info-circle"></i>
-          Explore les chaines similaires a toutes tes chaines validees. 
+          Explore les chaines similaires a partir des statuts selectionnes ci-dessus.
           Les resultats sont filtres pour ne montrer que les chaines francaises.
           Les chaines deja dans ta liste (validees, en attente, rejetees) sont ignorees.
         </p>

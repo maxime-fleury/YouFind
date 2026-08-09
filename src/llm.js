@@ -214,7 +214,7 @@ export async function scoreChannel(channelId) {
   const channel = stmts.getChannelByYoutubeId.get(channelId);
   if (!channel) {
     console.error(`[LLM] Channel ${channelId} not found`);
-    return null;
+    return { ok: false, reason: 'channel not found in database' };
   }
 
   const allTopics = stmts.getAllTopics.all();
@@ -230,8 +230,21 @@ export async function scoreChannel(channelId) {
   if (videos.length === 0) {
     const channelDesc = (channel.description || "").trim();
     if (!channelDesc) {
+      // Quick check: try fetching the channel page to see if it returns 404
+      let reason = 'no videos and no channel description (channel may no longer exist)';
+      try {
+        const check = await fetch(`https://www.youtube.com/channel/${channelId}`, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (check.status === 404) {
+          reason = 'channel no longer exists on YouTube (404)';
+        } else if (check.ok) {
+          reason = 'channel exists but has no public videos';
+        }
+      } catch { /* keep default reason */ }
       console.log(`[LLM] No videos or channel description found for "${channel.nom}", skipping`);
-      return null;
+      return { ok: false, reason };
     }
     console.log(`[LLM] No videos for "${channel.nom}", falling back to channel description`);
   }
@@ -254,7 +267,7 @@ export async function scoreChannel(channelId) {
 
     if (!parsed) {
       console.error(`[LLM] Failed to parse response for "${channel.nom}"`);
-      return null;
+      return { ok: false, reason: 'failed to parse LLM response' };
     }
 
     stmts.updateChannelLLM.run({
@@ -266,31 +279,39 @@ export async function scoreChannel(channelId) {
     assignTopicsFromLLM(channel.channel_id, parsed.topics);
 
     console.log(`[LLM] "${channel.nom}" scored ${parsed.score}/100, topics: [${parsed.topics.join(", ")}]`);
-    return parsed;
+    return { ok: true, ...parsed };
   } catch (err) {
     console.error(`[LLM] Error scoring "${channel.nom}":`, err.message);
-    return null;
+    return { ok: false, reason: `LLM error: ${err.message}` };
   }
 }
 
 async function scoreChannelList(channels, onProgress) {
   const results = [];
+  const failures = [];
   let completed = 0;
   let failed = 0;
-  onProgress?.({ total: channels.length, completed: 0, scored: 0, failed: 0, current: "" });
+  onProgress?.({ total: channels.length, completed: 0, scored: 0, failed: 0, failures: [], current: "" });
 
   await runWithLimit(
     channels,
     async (ch) => {
       const result = await scoreChannel(ch.channel_id);
-      if (result) results.push({ channel: ch.nom, ...result });
-      else failed++;
+      if (result?.ok) {
+        results.push({ channel: ch.nom, ...result });
+      } else {
+        failed++;
+        const reason = result?.reason || 'unknown reason';
+        failures.push({ channel: ch.nom, reason });
+        console.log(`[LLM] Failed to score "${ch.nom}": ${reason}`);
+      }
       completed++;
       onProgress?.({
         total: channels.length,
         completed,
         scored: results.length,
         failed,
+        failures,
         current: ch.nom,
       });
     },

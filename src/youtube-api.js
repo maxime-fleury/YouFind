@@ -1127,8 +1127,11 @@ function isLikelyFrench(html) {
 
 // --- Related channel discovery from validated channels ---
 
-export async function discoverRelatedFromValidated(onProgress, onResult, { passes = 1 } = {}) {
-  const baseSeeds = db.query(`SELECT channel_id, nom FROM channels WHERE status = 'validated'`).all();
+export async function discoverRelatedFromValidated(onProgress, onResult, { passes = 1, statuses = ['validated'], signal = null, pauseRef = null } = {}) {
+  // Build parameterized IN clause for the list of statuses
+  const placeholders = statuses.map(() => '?').join(', ');
+  const query = `SELECT channel_id, nom FROM channels WHERE status IN (${placeholders})`;
+  const baseSeeds = db.query(query).all(...statuses);
   // Google's recommendations vary between fetches, so scraping each channel
   // `passes` times surfaces more candidates within a single run.
   const validated = [];
@@ -1141,7 +1144,20 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
   const results = [];
   let completed = 0;
 
+  // Helper: wait while paused, checking the signal
+  const waitWhilePaused = async () => {
+    while (pauseRef?.paused && !signal?.aborted) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  };
+
   await runWithLimit(validated, async (ch) => {
+    // Check abort signal before processing
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    // Wait if paused
+    await waitWhilePaused();
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+
     onProgress?.(completed, validated.length, ch.nom, "running");
 
     try {

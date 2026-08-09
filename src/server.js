@@ -97,12 +97,15 @@ const scoringProgress = {
   completed: 0,
   scored: 0,
   failed: 0,
+  failures: [],
   current: "",
   status: "idle",
   error: "",
 };
 let isRelatedRunning = false;
 let relatedJobId = null;
+let relatedAbortController = null;
+let relatedPaused = false;
 const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const refreshVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const pendingVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
@@ -171,6 +174,7 @@ function startScoringJob(mode, scorer) {
   scoringProgress.completed = 0;
   scoringProgress.scored = 0;
   scoringProgress.failed = 0;
+  scoringProgress.failures = [];
   scoringProgress.current = "";
   scoringProgress.status = "running";
   scoringProgress.error = "";
@@ -181,6 +185,7 @@ function startScoringJob(mode, scorer) {
       scoringProgress.completed = progress.completed;
       scoringProgress.scored = progress.scored;
       scoringProgress.failed = progress.failed;
+      scoringProgress.failures = progress.failures || [];
       scoringProgress.current = progress.current || "";
     }))
     .then((results) => {
@@ -519,7 +524,10 @@ const server = Bun.serve({
         if (!ch) return json({ error: "Channel not found" }, 404);
 
         const result = await scoreChannel(ch.channel_id);
-        return json(result || { error: "Scoring failed" });
+        if (!result?.ok) {
+          return json({ error: result?.reason || "Scoring failed" });
+        }
+        return json(result);
       }),
     },
 
@@ -807,9 +815,15 @@ const server = Bun.serve({
 
         const body = await readBody(req);
         const passes = Math.max(1, Math.min(10, Number(body?.passes) || 1));
+        const validStatuses = ['pending', 'validated', 'rejected'];
+        const statuses = Array.isArray(body?.statuses) && body.statuses.length > 0
+          ? body.statuses.filter(s => validStatuses.includes(s))
+          : ['validated'];
 
         isRelatedRunning = true;
         relatedJobId = createJobId();
+        relatedAbortController = new AbortController();
+        relatedPaused = false;
         relatedProgress.total = 0;
         relatedProgress.completed = 0;
         relatedProgress.found = 0;
@@ -817,6 +831,8 @@ const server = Bun.serve({
         relatedProgress.status = "running";
         relatedProgress.results = [];
         relatedProgress.error = "";
+
+        const pauseRef = { get paused() { return relatedPaused; } };
 
         discoverRelatedFromValidated(
           (completed, total, current, status) => {
@@ -834,19 +850,26 @@ const server = Bun.serve({
             // away, matching the Discover page workflow.
             ingestChannel(result.channelId).catch(() => {});
           },
-          { passes }
+          { passes, statuses, signal: relatedAbortController.signal, pauseRef }
         )
           .then(() => {
             relatedProgress.status = "done";
             relatedProgress.completed = relatedProgress.total;
           })
           .catch((err) => {
-            relatedProgress.status = "error";
-            relatedProgress.error = err.message;
-            console.error("[Related] Discovery error:", err.message);
+            if (err.name === 'AbortError' || err.message === 'Aborted') {
+              relatedProgress.status = "cancelled";
+              console.log("[Related] Discovery cancelled by user");
+            } else {
+              relatedProgress.status = "error";
+              relatedProgress.error = err.message;
+              console.error("[Related] Discovery error:", err.message);
+            }
           })
           .finally(() => {
             isRelatedRunning = false;
+            relatedAbortController = null;
+            relatedPaused = false;
           });
 
         return json({ ok: true, status: "running", jobId: relatedJobId }, 202);
@@ -870,10 +893,30 @@ const server = Bun.serve({
           found: relatedProgress.found,
           current: relatedProgress.current,
           status: relatedProgress.status,
+          paused: relatedPaused,
           error: relatedProgress.error,
           results: relatedProgress.results.slice(sinceValue),
           next: relatedProgress.results.length,
         });
+      }
+
+      // POST /api/discover/related/cancel — abort the running job
+      if (method === "POST" && pathname === "/api/discover/related/cancel") {
+        if (!isRelatedRunning) {
+          return json({ error: "No related discovery in progress" }, 409);
+        }
+        relatedAbortController?.abort();
+        return json({ ok: true, status: "cancelling" });
+      }
+
+      // POST /api/discover/related/pause — toggle pause state
+      if (method === "POST" && pathname === "/api/discover/related/pause") {
+        if (!isRelatedRunning) {
+          return json({ error: "No related discovery in progress" }, 409);
+        }
+        relatedPaused = !relatedPaused;
+        relatedProgress.status = relatedPaused ? "paused" : "running";
+        return json({ ok: true, paused: relatedPaused, status: relatedProgress.status });
       }
 
       // --- API routes handled in fetch (bypass Bun router quirks) ---

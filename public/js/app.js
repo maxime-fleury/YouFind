@@ -959,7 +959,15 @@ function updateScoreProgress(data, labelText, prefix = "score") {
 
   if (data?.status === "done") {
     label.innerHTML = '<i class="bi bi-check-circle-fill"></i> Scoring terminé';
-    detail.textContent = `${data.scored || 0} chaîne${data.scored === 1 ? "" : "s"} scorée${data.scored === 1 ? "" : "s"}${data.failed ? ` · ${data.failed} échec${data.failed === 1 ? "" : "s"}` : ""}`;
+    let dt = `${data.scored || 0} chaîne${data.scored === 1 ? "" : "s"} scorée${data.scored === 1 ? "" : "s"}`;
+    if (data.failed) {
+      dt += ` · ${data.failed} échec${data.failed === 1 ? "" : "s"}`;
+      const failures = Array.isArray(data.failures) ? data.failures : [];
+      if (failures.length === 1) {
+        dt += ` (${failures[0].channel}: ${failures[0].reason})`;
+      }
+    }
+    detail.textContent = dt;
     bar.classList.remove("progress-bar-animated");
   } else if (data?.status === "error") {
     label.innerHTML = '<i class="bi bi-exclamation-circle-fill"></i> Scoring interrompu';
@@ -1014,7 +1022,16 @@ async function runScoreJob(endpoint, labelText, successText, prefix = "score") {
       updateScoreProgress(data, labelText, prefix);
 
       if (data.status === "done") {
-        status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}</span>`;
+        const failures = Array.isArray(data.failures) ? data.failures : [];
+        let msg = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}`;
+        if (failures.length > 0) {
+          msg += ` · <span style="color:var(--accent-yellow)">${failures.length} échec${failures.length === 1 ? "" : "s"}</span>`;
+          console.groupCollapsed(`[Scoring] ${failures.length} échec${failures.length === 1 ? "" : "s"} de scoring`);
+          failures.forEach((f) => console.log(`${f.channel}: ${f.reason}`));
+          console.groupEnd();
+        }
+        msg += '</span>';
+        status.innerHTML = msg;
         loadChannels();
         loadStats();
         return;
@@ -2053,6 +2070,41 @@ async function batchImport() {
 // --- Related Channels Discovery ---
 
 let isRelatedRunning = false;
+let relatedJobId = null;
+
+function showRelatedControls(running) {
+  document.getElementById('related-btn').classList.toggle('d-none', running);
+  document.getElementById('related-cancel-btn').classList.toggle('d-none', !running);
+  document.getElementById('related-pause-btn').classList.toggle('d-none', !running);
+}
+
+function resetRelatedPauseButton() {
+  const btn = document.getElementById('related-pause-btn');
+  btn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause';
+}
+
+async function cancelRelatedDiscovery() {
+  try {
+    await api('/discover/related/cancel', { method: 'POST' });
+    showToast('Exploration annulée', 'info');
+  } catch (err) {
+    showToast('Erreur: ' + err.message, 'error');
+  }
+}
+
+async function toggleRelatedPause() {
+  const btn = document.getElementById('related-pause-btn');
+  try {
+    const res = await api('/discover/related/pause', { method: 'POST' });
+    if (res.paused) {
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Reprendre';
+    } else {
+      btn.innerHTML = '<i class="bi bi-pause-fill"></i> Pause';
+    }
+  } catch (err) {
+    showToast('Erreur: ' + err.message, 'error');
+  }
+}
 
 function loadRelatedPage() {
   const status = document.getElementById("related-status");
@@ -2122,9 +2174,9 @@ function updateRelatedProgress(data) {
 }
 
 // Run the related exploration once, streaming results into the container.
-// `passes` duplicates each validated channel in the seed list so every channel
+// `passes` duplicates each seed channel in the seed list so every channel
 // is scraped `passes` times (Google's suggestions vary between fetches).
-async function runRelatedPass({ status, results, passes }) {
+async function runRelatedPass({ status, results, passes, statuses }) {
   let cursor = 0;
   let lastStatus = null;
   let jobId = "";
@@ -2134,7 +2186,7 @@ async function runRelatedPass({ status, results, passes }) {
 
   const startJob = () => api("/discover/related", {
     method: "POST",
-    body: JSON.stringify({ passes: passes || 1 }),
+    body: JSON.stringify({ passes: passes || 1, statuses }),
     timeout: 30000,
   });
 
@@ -2174,8 +2226,21 @@ async function runRelatedPass({ status, results, passes }) {
     if (data.status === "done") {
       return { found: Number(data.found) || 0, lastStatus: data };
     }
+    if (data.status === "cancelled") {
+      return { found: Number(data.found) || 0, lastStatus: data, cancelled: true };
+    }
     if (data.status === "error") {
       throw new Error(data.error || "Erreur pendant la découverte");
+    }
+
+    // Sync pause button state with server
+    if (typeof data.paused === 'boolean') {
+      const pauseBtn = document.getElementById('related-pause-btn');
+      if (pauseBtn) {
+        pauseBtn.innerHTML = data.paused
+          ? '<i class="bi bi-play-fill"></i> Reprendre'
+          : '<i class="bi bi-pause-fill"></i> Pause';
+      }
     }
   }
 
@@ -2191,8 +2256,17 @@ async function runRelatedDiscovery() {
   const results = document.getElementById("related-results");
   const badge = document.getElementById("related-badge");
 
+  showRelatedControls(true);
+  resetRelatedPauseButton();
+
   const runsInput = document.getElementById("related-runs");
   const passes = Math.max(1, Math.min(10, parseInt(runsInput?.value || "1", 10) || 1));
+
+  // Read selected statuses from the multi-select
+  const statusSelect = document.getElementById("related-statuses");
+  const statuses = statusSelect
+    ? Array.from(statusSelect.selectedOptions).map(o => o.value)
+    : ["validated"];
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-glass"></span> Exploration...';
@@ -2203,16 +2277,22 @@ async function runRelatedDiscovery() {
   updateRelatedProgress({ status: "running", total: 0, completed: 0, found: 0 });
 
   let lastStatus = null;
+  let wasCancelled = false;
 
   try {
-    const pass = await runRelatedPass({ status, results, passes });
+    const pass = await runRelatedPass({ status, results, passes, statuses });
     lastStatus = pass.lastStatus;
+    wasCancelled = pass.cancelled || false;
 
-    if (pass.found === 0) {
-      status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
+    if (wasCancelled) {
+      status.innerHTML = '<p class="text-muted" style="font-size:0.88rem"><i class="bi bi-slash-circle"></i> Exploration annulée. ' + (pass.found || 0) + ' chaîne(s) trouvée(s) avant l\'annulation.</p>';
+    } else if (pass.found === 0) {
+      status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines ou elargis les statuts pour enrichir la decouverte.</p>';
     }
-    loadStats();
-    scoreAllUnscored("related-score");
+    if (!wasCancelled) {
+      loadStats();
+      scoreAllUnscored("related-score");
+    }
   } catch (err) {
     updateRelatedProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, found: 0 });
     status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> ${escapeHtml(err.message)}</span>`;
@@ -2220,6 +2300,8 @@ async function runRelatedDiscovery() {
     isRelatedRunning = false;
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-search"></i> Explorer les similaires';
+    showRelatedControls(false);
+    resetRelatedPauseButton();
   }
 }
 
