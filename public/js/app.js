@@ -764,18 +764,23 @@ function toggleChannelsCompact() {
   renderChannels();
 }
 
+function setCompactSort(sort) {
+  document.getElementById("channel-sort").value = sort;
+  loadChannels();
+}
+
 function renderCompactTable(channels) {
   return `
     <div class="glass-card" style="overflow-x:auto">
       <table class="compact-channels-table">
         <thead>
           <tr>
-            <th>Chaîne</th>
+            <th style="cursor:pointer" onclick="setCompactSort('name')" title="Trier par nom">Chaîne</th>
             <th>Statut</th>
-            <th>Score</th>
-            <th>Abonnés</th>
+            <th style="cursor:pointer" onclick="setCompactSort('score')" title="Trier par score">Score</th>
+            <th style="cursor:pointer" onclick="setCompactSort('subs')" title="Trier par abonnés">Abonnés</th>
             <th>Vidéos</th>
-            <th>Ajoutée</th>
+            <th style="cursor:pointer" onclick="setCompactSort('date_desc')" title="Trier par date">Ajoutée</th>
             <th></th>
           </tr>
         </thead>
@@ -1436,12 +1441,31 @@ function addChannel() {
 async function refreshAllChannelStats() {
   const btn = document.getElementById("refresh-stats-btn");
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-glass"></span> Mise a jour...';
+  btn.innerHTML = '<span class="spinner-glass"></span> Stats...';
   showToast("Mise a jour des stats en arriere-plan...", "info");
 
   try {
-    await api("/channels/refresh-stats", { method: "POST", timeout: 120000 });
-    showToast("Stats mises a jour", "success");
+    await api("/channels/refresh-stats", { method: "POST" });
+    // Poll progress
+    const deadline = Date.now() + 30 * 60 * 1000;
+    let failures = 0;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const prog = await api("/refresh-stats/status");
+        failures = 0;
+        if (prog.status === "done") {
+          btn.innerHTML = `<i class="bi bi-check-circle"></i> ${prog.completed}/${prog.total}`;
+          showToast("Stats mises a jour !", "success");
+          break;
+        }
+        if (prog.status === "error") throw new Error("Refresh stats failed");
+        btn.innerHTML = `<span class="spinner-glass"></span> ${prog.completed || 0}/${prog.total || "?"}`;
+      } catch {
+        failures++;
+        if (failures >= 5) throw new Error("Connexion perdue");
+      }
+    }
     loadChannels();
     loadStats();
   } catch (err) {
@@ -1785,22 +1809,35 @@ function safeChannelId(value) {
   return /^[A-Za-z0-9_-]{1,64}$/.test(String(value || "")) ? String(value) : "";
 }
 
-function getSeenVideos() {
+let _seenCache = null;
+let _seenLoaded = false;
+
+async function loadSeenVideos() {
+  if (_seenLoaded) return;
   try {
-    return new Set(JSON.parse(localStorage.getItem("youfind-seen") || "[]"));
+    const urls = await api("/watched");
+    _seenCache = new Set(urls);
+    _seenLoaded = true;
   } catch {
-    return new Set();
+    // Fallback to localStorage
+    try {
+      _seenCache = new Set(JSON.parse(localStorage.getItem("youfind-seen") || "[]"));
+    } catch {
+      _seenCache = new Set();
+    }
+    _seenLoaded = true;
   }
 }
 
+function getSeenVideos() {
+  if (!_seenLoaded) return new Set();
+  return _seenCache || new Set();
+}
+
 function markVideoSeen(url) {
-  const seen = getSeenVideos();
-  seen.add(url);
-  try {
-    localStorage.setItem("youfind-seen", JSON.stringify([...seen]));
-  } catch {
-    // Storage full or private browsing — silently ignore
-  }
+  if (_seenCache) _seenCache.add(url);
+  // Fire-and-forget to server (ignore errors)
+  api("/watched", { method: "POST", body: JSON.stringify({ url }) }).catch(() => {});
 }
 
 function extractVideoId(url) {
@@ -1934,6 +1971,42 @@ function playVideo(url) {
   whenYTReady(() => openPlayer(videoId));
 }
 
+async function exportBackup() {
+  try {
+    const data = await api("/export");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `youfind-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Backup exporté !", "success");
+  } catch (err) {
+    showToast("Erreur export: " + err.message, "error");
+  }
+}
+
+async function importBackup(file) {
+  if (!file) return;
+  const status = document.getElementById("import-backup-status");
+  status.innerHTML = '<span class="spinner-glass"></span> Import en cours...';
+  try {
+    const text = await file.text();
+    const body = JSON.parse(text);
+    const result = await api("/import", { method: "POST", body: JSON.stringify(body), timeout: 60000 });
+    status.innerHTML = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${result.imported.channels} chaînes, ${result.imported.topics} topics, ${result.imported.watched} vidéos vues, ${result.imported.settings} réglages importés</span>`;
+    showToast("Import terminé !", "success");
+    loadSettings();
+    loadTopics();
+    _seenLoaded = false;
+    loadSeenVideos();
+  } catch (err) {
+    status.innerHTML = `<span style="color:var(--accent-red)">Erreur: ${escapeHtml(err.message)}</span>`;
+  }
+  document.getElementById("import-backup-input").value = "";
+}
+
 // --- Player control bindings ---
 document.addEventListener("DOMContentLoaded", () => {
   const backdrop = document.getElementById("playerBackdrop");
@@ -1942,6 +2015,9 @@ document.addEventListener("DOMContentLoaded", () => {
   closeBtn.addEventListener("click", closePlayer);
   backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closePlayer(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePlayer(); });
+
+  // Preload watched videos from DB in the background
+  loadSeenVideos();
 });
 
 function escapeJs(str) {

@@ -809,6 +809,85 @@ const server = Bun.serve({
       },
     },
 
+    "/api/watched": {
+      GET: () => {
+        const rows = stmts.getAllWatchedVideos.all();
+        return json(rows.map(r => r.url));
+      },
+      POST: async (req) => {
+        const body = await readBody(req);
+        if (body.url && typeof body.url === "string") {
+          stmts.insertWatchedVideo.run(body.url);
+        }
+        return json({ ok: true });
+      },
+    },
+
+    "/api/export": {
+      GET: () => {
+        const settings = getAllSettings();
+        const channels = stmts.getAllChannels.all();
+        const topics = stmts.getAllTopics.all();
+        const watched = stmts.getAllWatchedVideos.all().map(r => r.url);
+        // Strip secret fields
+        delete settings.openrouter_key;
+        return json({ version: 1, exportedAt: new Date().toISOString(), settings, channels, topics, watched });
+      },
+    },
+
+    "/api/import": {
+      POST: async (req) => {
+        const body = await readBody(req);
+        if (!body.channels || !body.settings || !body.topics) {
+          return json({ error: "Invalid backup format" }, 400);
+        }
+        let imported = { channels: 0, topics: 0, watched: 0, settings: 0 };
+        // Restore settings (skip secrets)
+        for (const [k, v] of Object.entries(body.settings)) {
+          if (SECRET_SETTINGS.has(k) || !SETTINGS_KEYS.has(k)) continue;
+          setSetting(k, String(v));
+          imported.settings++;
+        }
+        // Restore topics with display_order
+        for (const t of body.topics) {
+          if (!t.nom) continue;
+          stmts.insertTopic.run({ $nom: t.nom, $description: t.description || "" });
+          if (t.display_order != null) {
+            const id = db.query("SELECT last_insert_rowid() as id").get().id;
+            stmts.updateTopicOrder.run(t.display_order, id);
+          }
+          imported.topics++;
+        }
+        // Restore channels (only if not already present)
+        const existing = new Set(stmts.getAllChannels.all().map(c => c.channel_id));
+        for (const ch of body.channels) {
+          if (!ch.channel_id || existing.has(ch.channel_id)) continue;
+          stmts.insertChannel.run({
+            $nom: ch.nom || ch.channel_id,
+            $channel_id: ch.channel_id,
+            $subscriber_count: ch.subscriber_count || 0,
+            $last_video_date: ch.last_video_date || null,
+            $thumbnail: ch.thumbnail || "",
+            $description: ch.description || "",
+          });
+          // Restore status
+          if (ch.status && ch.status !== "pending") {
+            const inserted = stmts.getChannelByYoutubeId.get(ch.channel_id);
+            if (inserted) {
+              stmts.updateChannelStatus.run({ $status: ch.status, $id: inserted.id });
+            }
+          }
+          imported.channels++;
+        }
+        // Restore watched videos
+        for (const url of (body.watched || [])) {
+          stmts.insertWatchedVideo.run(url);
+          imported.watched++;
+        }
+        return json({ ok: true, imported });
+      },
+    },
+
     "/api/rss-info": {
       GET: () => json(getRSSInfo()),
     },

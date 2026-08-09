@@ -104,6 +104,13 @@ db.run(`
 db.run(`CREATE INDEX IF NOT EXISTS idx_ct_topic ON channel_topics(topic_id);`);
 db.run(`CREATE INDEX IF NOT EXISTS idx_ct_channel ON channel_topics(channel_id);`);
 
+db.run(`
+  CREATE TABLE IF NOT EXISTS watched_videos (
+    url TEXT PRIMARY KEY,
+    watched_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
 // --- FTS5 full-text search index for videos ---
 db.run(`
   CREATE VIRTUAL TABLE IF NOT EXISTS videos_fts USING fts5(
@@ -416,6 +423,9 @@ const stmts = {
   getBlacklistedChannelIds: db.prepare(`
     SELECT DISTINCT channel_id FROM feedback_log WHERE decision = 'rejected'
   `),
+
+  insertWatchedVideo: db.prepare(`INSERT OR IGNORE INTO watched_videos (url) VALUES (?)`),
+  getAllWatchedVideos: db.prepare(`SELECT url FROM watched_videos ORDER BY watched_at DESC`),
 };
 
 export { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts };

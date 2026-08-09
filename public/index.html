@@ -456,6 +456,16 @@
             <div class="settings-tip"><i class="bi bi-speedometer2"></i><span>Utilise un modèle déjà chargé pour accélérer le scoring.</span></div>
             <div class="settings-tip"><i class="bi bi-cloud-check"></i><span>OpenRouter nécessite une clé et peut consommer des crédits.</span></div>
           </div>
+
+          <div class="glass-card settings-card p-4">
+            <h6 class="text-purple-light mb-3"><i class="bi bi-archive"></i> Sauvegarde</h6>
+            <div class="d-flex gap-2">
+              <button class="btn btn-primary-glass btn-sm" onclick="exportBackup()"><i class="bi bi-download"></i> Exporter (JSON)</button>
+              <button class="btn btn-glass btn-sm" onclick="document.getElementById('import-backup-input').click()"><i class="bi bi-upload"></i> Importer</button>
+              <input type="file" id="import-backup-input" accept=".json" style="display:none" onchange="importBackup(this.files[0])">
+            </div>
+            <div id="import-backup-status" class="mt-2" style="font-size:0.82rem"></div>
+          </div>
         </div>
       </div>
     </div>
