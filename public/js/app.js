@@ -998,7 +998,7 @@ async function initTopicDragDrop(grid) {
   });
 }
 
-function deleteTopic(id) {
+async function deleteTopic(id) {
   if (!confirm("Supprimer ce topic ?")) return;
   try {
     await api(`/topics?id=${id}`, { method: "DELETE" });
