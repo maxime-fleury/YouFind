@@ -526,6 +526,8 @@ const server = Bun.serve({
           stmts.updateChannelStatus.run({ $status: "validated", $id: id });
         });
         validateTx();
+        // Fire-and-forget: deep crawl videos in the background
+        ingestChannel(ch.channel_id).catch(err => console.error(`[Validate] ingest failed for ${ch.nom}:`, err.message));
         return json({ ok: true });
       },
     },
