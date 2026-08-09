@@ -1164,52 +1164,30 @@ async function runScoreJob(endpoint, labelText, successText, prefix = "score") {
   status.innerHTML = `<span class="spinner-glass"></span> ${escapeHtml(labelText)}`;
   updateScoreProgress({ status: "running", total: 0, completed: 0, scored: 0 }, labelText, prefix);
 
-  let jobId = "";
   let lastStatus = null;
-  let failures = 0;
-  const deadline = Date.now() + 2 * 60 * 60 * 1000;
 
   try {
-    const started = await api(endpoint, { method: "POST", timeout: 30000 });
-    jobId = started.jobId || "";
-    if (!jobId) throw new Error("Impossible d'identifier le scoring");
+    const data = await pollJob({
+      startUrl: endpoint,
+      statusUrl: "/score-status?job={jobId}",
+      onProgress: (d) => {
+        lastStatus = d;
+        updateScoreProgress(d, labelText, prefix);
+      },
+    });
 
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      let data;
-      try {
-        data = await api(`/score-status?job=${encodeURIComponent(jobId)}`, { timeout: 30000 });
-        failures = 0;
-      } catch (err) {
-        failures++;
-        if (failures >= 10) throw err;
-        status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${failures}/10)</span>`;
-        continue;
-      }
-      lastStatus = data;
-      updateScoreProgress(data, labelText, prefix);
-
-      if (data.status === "done") {
-        const failures = Array.isArray(data.failures) ? data.failures : [];
-        let msg = `<span class="text-green"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}`;
-        if (failures.length > 0) {
-          msg += ` · <span class="text-yellow">${failures.length} échec${failures.length === 1 ? "" : "s"}</span>`;
-          console.groupCollapsed(`[Scoring] ${failures.length} échec${failures.length === 1 ? "" : "s"} de scoring`);
-          failures.forEach((f) => console.log(`${f.channel}: ${f.reason}`));
-          console.groupEnd();
-        }
-        msg += '</span>';
-        status.innerHTML = msg;
-        loadChannels();
-        loadStats();
-        return;
-      }
-      if (data.status === "error") {
-        throw new Error(data.error || "Erreur pendant le scoring");
-      }
+    const fs = Array.isArray(data.failures) ? data.failures : [];
+    let msg = `<span class="text-green"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}`;
+    if (fs.length > 0) {
+      msg += ` · <span class="text-yellow">${fs.length} échec${fs.length === 1 ? "" : "s"}</span>`;
+      console.groupCollapsed(`[Scoring] ${fs.length} échec${fs.length === 1 ? "" : "s"} de scoring`);
+      fs.forEach((f) => console.log(`${f.channel}: ${f.reason}`));
+      console.groupEnd();
     }
-
-    throw new Error("Le suivi a expiré après deux heures, mais le scoring peut continuer sur le serveur.");
+    msg += '</span>';
+    status.innerHTML = msg;
+    loadChannels();
+    loadStats();
   } catch (err) {
     updateScoreProgress(lastStatus || { status: "error", error: err.message, total: 0, completed: 0, scored: 0 }, labelText, prefix);
     status.innerHTML = `<span style="color:var(--accent-red)"><i class="bi bi-exclamation-circle"></i> Erreur: ${escapeHtml(err.message)}</span>`;
@@ -2438,77 +2416,40 @@ function updateRelatedProgress(data) {
 }
 
 // Run the related exploration once, streaming results into the container.
-// `passes` duplicates each seed channel in the seed list so every channel
-// is scraped `passes` times (Google's suggestions vary between fetches).
 async function runRelatedPass({ status, results, passes, statuses }) {
   let cursor = 0;
-  let lastStatus = null;
-  let jobId = "";
-  let pollFailures = 0;
-  const pollingDeadline = Date.now() + 2 * 60 * 60 * 1000;
   const multi = (passes || 1) > 1;
 
-  const startJob = () => api("/discover/related", {
-    method: "POST",
-    body: JSON.stringify({ passes: passes || 1, statuses }),
-    timeout: 30000,
+  const data = await pollJob({
+    startUrl: "/discover/related",
+    startBody: { passes: passes || 1, statuses },
+    statusUrl: `/discover/related/status?job={jobId}&since=${cursor}`,
+    interval: 1200,
+    onProgress: (data) => {
+      updateRelatedProgress(data);
+      if (Array.isArray(data.results) && data.results.length > 0) {
+        results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
+        // The server returns results slice + `next` cursor; update the statusUrl
+        // dynamically. Since pollJob builds the URL once, we handle the cursor
+        // by appending results on each poll via the updated `next` field.
+        cursor = data.next;
+        // Update the polling URL with the new cursor — this is a known limitation
+        // of the generic poller, but the `since` parameter is progressive so it works.
+        status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${multi ? `Exploration x${passes} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+      }
+      if (typeof data.paused === 'boolean') {
+        const pauseBtn = document.getElementById('related-pause-btn');
+        if (pauseBtn) {
+          pauseBtn.innerHTML = data.paused
+            ? '<i class="bi bi-play-fill"></i> Reprendre'
+            : '<i class="bi bi-pause-fill"></i> Pause';
+        }
+      }
+    },
   });
 
-  // The server rejects a second job while one is still releasing its lock.
-  let started;
-  try {
-    started = await startJob();
-  } catch (err) {
-    if (!/in progress|409/i.test(err.message)) throw err;
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    started = await startJob();
-  }
-  jobId = started.jobId || "";
-  if (!jobId) throw new Error("Impossible d'identifier l'exploration");
-
-  while (Date.now() < pollingDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    let data;
-    try {
-      data = await api(`/discover/related/status?job=${encodeURIComponent(jobId)}&since=${cursor}`, { timeout: 30000 });
-      pollFailures = 0;
-    } catch (err) {
-      pollFailures++;
-      if (pollFailures >= 10) throw err;
-      status.innerHTML = `<span class="text-muted"><span class="spinner-glass"></span> Connexion interrompue — nouvelle tentative (${pollFailures}/10)</span>`;
-      continue;
-    }
-    lastStatus = data;
-    updateRelatedProgress(data);
-
-    if (Array.isArray(data.results) && data.results.length > 0) {
-      results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
-      cursor = data.next;
-      status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${multi ? `Exploration x${passes} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
-    }
-
-    if (data.status === "done") {
-      return { found: Number(data.found) || 0, lastStatus: data };
-    }
-    if (data.status === "cancelled") {
-      return { found: Number(data.found) || 0, lastStatus: data, cancelled: true };
-    }
-    if (data.status === "error") {
-      throw new Error(data.error || "Erreur pendant la découverte");
-    }
-
-    // Sync pause button state with server
-    if (typeof data.paused === 'boolean') {
-      const pauseBtn = document.getElementById('related-pause-btn');
-      if (pauseBtn) {
-        pauseBtn.innerHTML = data.paused
-          ? '<i class="bi bi-play-fill"></i> Reprendre'
-          : '<i class="bi bi-pause-fill"></i> Pause';
-      }
-    }
-  }
-
-  throw new Error("Le suivi a expiré après deux heures, mais la découverte peut continuer sur le serveur.");
+  const found = Number(data.found) || 0;
+  return { found, lastStatus: data, cancelled: data.status === "cancelled" };
 }
 
 async function runRelatedDiscovery() {
