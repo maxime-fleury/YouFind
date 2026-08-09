@@ -679,7 +679,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
             <span><i class="bi bi-people"></i> ${formatNumber(ch.subscriber_count)} abonnes</span>
             ${ch.video_count != null ? `<span><i class="bi bi-camera-reels"></i> ${ch.video_count} vidéo${ch.video_count === 1 ? "" : "s"}</span>` : ""}
             <span><i class="bi bi-calendar3"></i> ${formatDate(ch.date_ajout)}</span>
-            ${isNewChannel(ch) ? '<span class="status-badge" style="background:rgba(52,211,153,0.15);color:var(--accent-green);animation:pulse-new 2s ease-in-out infinite">New</span>' : ""}
+            ${isNewChannel(ch) ? '<span class="badge-new">New</span>' : ""}
           </div>
           ${ch.llm_summary || ch.description ? `<div class="llm-summary${ch.llm_summary ? "" : " fallback"}">${escapeHtml(ch.llm_summary || ch.description)}</div>` : ""}
           ${ch.raison_rejet ? `<div class="mt-1" style="font-size:0.78rem;color:var(--accent-red)"><i class="bi bi-x-circle"></i> ${escapeHtml(ch.raison_rejet)}</div>` : ""}
@@ -731,9 +731,8 @@ function renderChannels(searchQuery, channels = _allChannels) {
         </div>
       </div>`
     )
-    .join("")
-    + (hiddenCount > 0
-      ? `<div class="text-center text-muted py-3" style="font-size:0.78rem">${hiddenCount} autre${hiddenCount > 1 ? "s" : ""} chaîne${hiddenCount > 1 ? "s" : ""} — affines ta recherche pour en voir plus</div>`
+    .join("")      + (hiddenCount > 0
+      ? `<div class="text-center text-muted py-3 text-xs">${hiddenCount} autre${hiddenCount > 1 ? "s" : ""} chaîne${hiddenCount > 1 ? "s" : ""} — affines ta recherche pour en voir plus</div>`
       : "");
 
   if (searchQuery) {
@@ -794,14 +793,14 @@ function renderCompactTable(channels) {
                 <div class="d-flex align-items-center gap-2">
                   ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover">` : ''}
                   <span class="fw-medium">${escapeHtml(ch.nom)}</span>
-                  ${isNewChannel(ch) ? '<span class="status-badge" style="background:rgba(52,211,153,0.15);color:var(--accent-green);font-size:0.65rem">New</span>' : ''}
+                  ${isNewChannel(ch) ? '<span class="badge-new" style="font-size:0.65rem">New</span>' : ''}
                 </div>
               </td>
               <td><span class="status-badge ${ch.status}" style="font-size:0.7rem">${ch.status}</span></td>
               <td>${ch.llm_score != null ? `<span class="llm-score ${ch.llm_score >= 70 ? 'high' : ch.llm_score >= 40 ? 'medium' : 'low'}" style="font-size:0.75rem">${ch.llm_score}/100</span>` : '—'}</td>
               <td>${formatNumber(ch.subscriber_count)}</td>
               <td>${ch.video_count ?? '—'}</td>
-              <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(ch.date_ajout)}</td>
+              <td class="text-xs text-muted">${formatDate(ch.date_ajout)}</td>
               <td>
                 ${ch.status === 'pending' ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannel(${ch.id})" style="padding:2px 8px;font-size:0.68rem"><i class="bi bi-check-lg"></i></button>` : ''}
                 <button class="btn btn-sm-glass btn-sm" onclick="event.stopPropagation();window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos','_blank')" style="padding:2px 6px;font-size:0.68rem"><i class="bi bi-youtube"></i></button>
@@ -810,7 +809,7 @@ function renderCompactTable(channels) {
           `).join("")}
         </tbody>
       </table>
-      ${channels.length > CHANNEL_RENDER_CAP ? `<div class="text-center text-muted py-2" style="font-size:0.75rem">${channels.length - CHANNEL_RENDER_CAP} autre${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} chaîne${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} — affines ta recherche</div>` : ''}
+      ${channels.length > CHANNEL_RENDER_CAP ? `<div class="text-center text-muted py-2 text-xs">${channels.length - CHANNEL_RENDER_CAP} autre${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} chaîne${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} — affines ta recherche</div>` : ''}
     </div>`;
 }
 
@@ -1192,9 +1191,9 @@ async function runScoreJob(endpoint, labelText, successText, prefix = "score") {
 
       if (data.status === "done") {
         const failures = Array.isArray(data.failures) ? data.failures : [];
-        let msg = `<span style="color:var(--accent-green)"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}`;
+        let msg = `<span class="text-green"><i class="bi bi-check-circle"></i> ${successText}: ${data.scored || 0} chaine${data.scored === 1 ? "" : "s"}`;
         if (failures.length > 0) {
-          msg += ` · <span style="color:var(--accent-yellow)">${failures.length} échec${failures.length === 1 ? "" : "s"}</span>`;
+          msg += ` · <span class="text-yellow">${failures.length} échec${failures.length === 1 ? "" : "s"}</span>`;
           console.groupCollapsed(`[Scoring] ${failures.length} échec${failures.length === 1 ? "" : "s"} de scoring`);
           failures.forEach((f) => console.log(`${f.channel}: ${f.reason}`));
           console.groupEnd();
