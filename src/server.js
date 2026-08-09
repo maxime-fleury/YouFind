@@ -821,6 +821,13 @@ const server = Bun.serve({
         }
         return json({ ok: true });
       },
+      DELETE: async (req) => {
+        const body = await readBody(req);
+        if (body.url && typeof body.url === "string") {
+          stmts.deleteWatchedVideo.run(body.url);
+        }
+        return json({ ok: true });
+      },
     },
 
     "/api/export": {

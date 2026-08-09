@@ -426,6 +426,7 @@ const stmts = {
   `),
 
   insertWatchedVideo: db.prepare(`INSERT OR IGNORE INTO watched_videos (url) VALUES (?)`),
+  deleteWatchedVideo: db.prepare(`DELETE FROM watched_videos WHERE url = ?`),
   getAllWatchedVideos: db.prepare(`SELECT url FROM watched_videos ORDER BY watched_at DESC`),
 };
 

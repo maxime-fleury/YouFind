@@ -350,6 +350,9 @@ function renderVideoCard(v, seenSet) {
             ${seenClass ? `<span class="seen-badge"><i class="bi bi-check-circle-fill"></i> Vu</span>` : ""}
             <span class="views-badge"><i class="bi bi-eye"></i> ${formatNumber(v.vues)}</span>
             ${v.duration ? `<span class="duration-badge">${formatDuration(v.duration)}</span>` : ""}
+            <button class="seen-toggle-btn" onclick="toggleVideoSeen('${escapeInlineJs(v.url)}', event)" title="${seenClass ? 'Marquer comme non vu' : 'Marquer comme vu'}">
+              <i class="bi ${seenClass ? 'bi-eye-slash-fill' : 'bi-eye-fill'}"></i>
+            </button>
           </div>
         <div class="card-body">
           <div class="video-title">
@@ -1842,8 +1845,44 @@ function getSeenVideos() {
 
 function markVideoSeen(url) {
   if (_seenCache) _seenCache.add(url);
-  // Fire-and-forget to server (ignore errors)
   api("/watched", { method: "POST", body: JSON.stringify({ url }) }).catch(() => {});
+}
+
+function unmarkVideoSeen(url) {
+  if (_seenCache) _seenCache.delete(url);
+  api("/watched", { method: "DELETE", body: JSON.stringify({ url }) }).catch(() => {});
+}
+
+async function toggleVideoSeen(url, event) {
+  event.stopPropagation();
+  if (getSeenVideos().has(url)) {
+    unmarkVideoSeen(url);
+  } else {
+    markVideoSeen(url);
+  }
+  // Update the card UI immediately
+  const card = document.querySelector(`.video-card[data-video-url="${CSS.escape(url)}"]`);
+  if (card) {
+    const seen = getSeenVideos().has(url);
+    card.classList.toggle("seen", seen);
+    card.title = seen ? "Déjà vu" : "";
+    const thumb = card.querySelector(".thumb-wrap");
+    const badge = thumb?.querySelector(".seen-badge");
+    if (seen && !badge) {
+      const b = document.createElement("span");
+      b.className = "seen-badge";
+      b.innerHTML = '<i class="bi bi-check-circle-fill"></i> Vu';
+      thumb?.appendChild(b);
+    } else if (!seen && badge) {
+      badge.remove();
+    }
+    // Toggle the eye button icon
+    const btn = card.querySelector(".seen-toggle-btn");
+    if (btn) {
+      btn.innerHTML = seen ? '<i class="bi bi-eye-slash-fill"></i>' : '<i class="bi bi-eye-fill"></i>';
+      btn.title = seen ? "Marquer comme non vu" : "Marquer comme vu";
+    }
+  }
 }
 
 function extractVideoId(url) {

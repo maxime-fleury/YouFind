@@ -716,6 +716,38 @@ main, nav, .modal-content {
   letter-spacing: 0.02em;
   pointer-events: none;
 }
+.video-card .thumb-wrap .seen-toggle-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  color: rgba(255,255,255,0.7);
+  font-size: 0.78rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 2;
+}
+.video-card .thumb-wrap:hover .seen-toggle-btn,
+.video-card .thumb-wrap .seen-toggle-btn:focus-visible {
+  opacity: 1;
+}
+.video-card:not(.seen) .thumb-wrap .seen-toggle-btn:hover {
+  background: rgba(52, 211, 153, 0.5);
+  color: white;
+}
+.video-card.seen .thumb-wrap .seen-toggle-btn:hover {
+  background: rgba(248, 113, 113, 0.5);
+  color: white;
+}
 .video-card .card-body {
   padding: 14px;
 }
