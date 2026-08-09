@@ -2469,10 +2469,12 @@ let currentDetailChannel = null;
 // Ordered queue of pending channels for the "valider/refuser + suivant" triage flow.
 let detailQueue = null; // [{ id, nom }] in pending-list order
 let detailQueueIndex = -1;
+let detailPrefetch = null; // { id, data } prefetched for next channel
 
 channelDetailModal._element.addEventListener("hidden.bs.modal", () => {
   detailQueue = null;
   detailQueueIndex = -1;
+  detailPrefetch = null;
 });
 
 async function openChannelDetail(id, opts = {}) {
@@ -2490,7 +2492,14 @@ async function openChannelDetail(id, opts = {}) {
   channelDetailModal.show();
 
   try {
-    const data = await api(`/channels/${id}/detail`);
+    // Use prefetched data if available for this channel
+    let data;
+    if (detailPrefetch?.id === id) {
+      data = detailPrefetch.data;
+      detailPrefetch = null;
+    } else {
+      data = await api(`/channels/${id}/detail`);
+    }
     const ch = data.channel;
     currentDetailChannel = { id, channel_id: ch.channel_id, nom: ch.nom, status: ch.status };
 
@@ -2534,6 +2543,14 @@ async function openChannelDetail(id, opts = {}) {
 
     // Load related channels
     loadRelatedChannels(id);
+
+    // Prefetch the next channel in the queue for instant "suivant"
+    if (opts.keepQueue && detailQueue && detailQueueIndex + 1 < detailQueue.length) {
+      const nextId = detailQueue[detailQueueIndex + 1].id;
+      api(`/channels/${nextId}/detail`).then(data => {
+        detailPrefetch = { id: nextId, data };
+      }).catch(() => { detailPrefetch = null; });
+    }
   } catch (err) {
     document.getElementById("detail-ch-name").textContent = "Erreur";
     document.getElementById("detail-ch-related").innerHTML = `<div class="text-muted">${err.message}</div>`;
