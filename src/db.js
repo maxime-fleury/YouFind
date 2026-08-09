@@ -110,6 +110,7 @@ db.run(`
     watched_at TEXT DEFAULT (datetime('now'))
   );
 `);
+db.run(`CREATE INDEX IF NOT EXISTS idx_watched_at ON watched_videos(watched_at DESC);`);
 
 // --- FTS5 full-text search index for videos ---
 db.run(`

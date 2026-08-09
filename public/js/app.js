@@ -1230,9 +1230,11 @@ function rescoreAll() {
 
 async function scoreSingle(channelId, elemId) {
   const card = document.getElementById(`ch-${elemId}`);
-  const actionsDiv = card?.querySelector(".ch-actions");
-  if (actionsDiv) {
-    actionsDiv.innerHTML = '<span class="spinner-glass"></span>';
+  const scoreBtn = card?.querySelector(`button[onclick*="scoreSingle"]`);
+  const originalHTML = scoreBtn?.innerHTML;
+  if (scoreBtn) {
+    scoreBtn.disabled = true;
+    scoreBtn.innerHTML = '<span class="spinner-glass"></span>';
   }
 
   try {
@@ -1245,6 +1247,10 @@ async function scoreSingle(channelId, elemId) {
     loadChannels();
   } catch {
     showToast("Erreur de scoring", "error");
+    if (scoreBtn) {
+      scoreBtn.disabled = false;
+      scoreBtn.innerHTML = originalHTML || '<i class="bi bi-stars"></i> Score';
+    }
   }
 }
 
@@ -2508,6 +2514,7 @@ async function runRelatedDiscovery() {
 }
 
 async function quickValidate(channelId, btn) {
+  if (isRelatedRunning) return showToast("Attends la fin de l'exploration", "info");
   try {
     const channels = await api("/channels?status=pending");
     const ch = channels.find((c) => c.channel_id === channelId);
@@ -2523,6 +2530,7 @@ async function quickValidate(channelId, btn) {
 }
 
 async function quickReject(channelId, name, btn) {
+  if (isRelatedRunning) return showToast("Attends la fin de l'exploration", "info");
   try {
     const channels = await api("/channels?status=pending");
     const ch = channels.find((c) => c.channel_id === channelId);
