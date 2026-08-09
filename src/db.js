@@ -56,9 +56,13 @@ db.run(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nom TEXT NOT NULL,
     description TEXT,
-    date_ajout TEXT DEFAULT (datetime('now'))
+    date_ajout TEXT DEFAULT (datetime('now')),
+    display_order INTEGER DEFAULT 0
   );
 `);
+
+// Migration: add display_order column for existing databases
+try { db.run("ALTER TABLE topics ADD COLUMN display_order INTEGER DEFAULT 0"); } catch {}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS feedback_log (
@@ -233,7 +237,6 @@ try {
 }
 
 const DEFAULT_SETTINGS = {
-  youtube_api_key: "",
   llm_provider: "ollama",
   ollama_url: "http://localhost:11434",
   ollama_model: "llama3.2:3b",
@@ -241,6 +244,7 @@ const DEFAULT_SETTINGS = {
   lmstudio_model: "default",
   openrouter_key: "",
   openrouter_model: "meta-llama/llama-3.1-8b-instruct:free",
+  llm_concurrency: "3",
 };
 
 const getSettingStmt = db.prepare(`SELECT value FROM settings WHERE key = ?`);
@@ -281,7 +285,6 @@ function initSettings() {
 
 function getEnvForSetting(key) {
   const map = {
-    youtube_api_key: "YOUTUBE_API_KEY",
     llm_provider: "LLM_PROVIDER",
     ollama_url: "OLLAMA_URL",
     ollama_model: "OLLAMA_MODEL",
@@ -304,8 +307,8 @@ const stmts = {
   `),
 
   getChannelByYoutubeId: db.prepare(`SELECT * FROM channels WHERE channel_id = ?`),
-  getChannelsByStatus: db.prepare(`SELECT * FROM channels WHERE status = ? ORDER BY date_ajout DESC`),
-  getAllChannels: db.prepare(`SELECT * FROM channels ORDER BY date_ajout DESC`),
+  getChannelsByStatus: db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count FROM channels c WHERE c.status = ? ORDER BY c.date_ajout DESC`),
+  getAllChannels: db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count FROM channels c ORDER BY c.date_ajout DESC`),
   getPendingChannels: db.prepare(`SELECT * FROM channels WHERE status = 'pending' ORDER BY llm_score DESC NULLS LAST`),
   getPendingChannelsWithoutVideos: db.prepare(`
     SELECT c.* FROM channels c
@@ -339,7 +342,8 @@ const stmts = {
   updateChannelLastRefresh: db.prepare(`UPDATE channels SET last_refresh = ? WHERE channel_id = ?`),
 
   insertTopic: db.prepare(`INSERT INTO topics (nom, description) VALUES ($nom, $description)`),
-  getAllTopics: db.prepare(`SELECT * FROM topics ORDER BY date_ajout DESC`),
+  getAllTopics: db.prepare(`SELECT * FROM topics ORDER BY display_order ASC, date_ajout DESC`),
+  updateTopicOrder: db.prepare(`UPDATE topics SET display_order = ? WHERE id = ?`),
   deleteTopic: db.prepare(`DELETE FROM topics WHERE id = ?`),
 
   insertFeedback: db.prepare(`INSERT INTO feedback_log (channel_id, channel_nom, decision, raison) VALUES ($channel_id, $channel_nom, $decision, $raison)`),

@@ -1,8 +1,9 @@
 import { join, dirname, resolve, relative } from "path";
 import { db, stmts, getSetting, setSetting, getAllSettings, rebuildChannelsFts } from "./db.js";
 import { ingestChannel, refreshAllChannels, refreshAllVideos, refreshPendingWithoutVideos, deepIngestChannel } from "./rss.js";
-import { discoverFromTopic, getQuotaUsage, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
+import { discoverFromTopic, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
+import { runWithLimit } from "./utils.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
 
 const PORT = parseInt(Bun.env.PORT || "3000");
@@ -15,12 +16,13 @@ const CORS_HEADERS = {
 };
 
 const SETTINGS_KEYS = new Set([
-  "youtube_api_key", "llm_provider",
+  "llm_provider",
   "ollama_url", "ollama_model",
   "lmstudio_url", "lmstudio_model",
   "openrouter_key", "openrouter_model",
+  "llm_concurrency",
 ]);
-const SECRET_SETTINGS = new Set(["youtube_api_key", "openrouter_key"]);
+const SECRET_SETTINGS = new Set(["openrouter_key"]);
 
 function getPublicSettings() {
   const settings = getAllSettings();
@@ -109,6 +111,7 @@ let relatedPaused = false;
 const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const refreshVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
 const pendingVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
+const refreshStatsProgress = { total: 0, completed: 0, current: "", status: "idle" };
 const relatedProgress = {
   total: 0,
   completed: 0,
@@ -328,7 +331,17 @@ const server = Bun.serve({
         const status = url.searchParams.get("status");
         const include = url.searchParams.get("include");
         const q = url.searchParams.get("q")?.trim() || "";
+        const sort = url.searchParams.get("sort") || "date_desc";
         let channels;
+
+        const sortMap = {
+          date_desc: "c.date_ajout DESC",
+          date_asc: "c.date_ajout ASC",
+          name: "c.nom COLLATE NOCASE ASC",
+          score: "c.llm_score DESC NULLS LAST",
+          subs: "c.subscriber_count DESC",
+        };
+        const orderClause = sortMap[sort] || "c.date_ajout DESC";
 
         const hasChannelFts = !!db.query(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channels_fts'`).get();
 
@@ -361,7 +374,7 @@ const server = Bun.serve({
               params.push(status);
             }
             const sql = `
-              SELECT DISTINCT c.*
+              SELECT DISTINCT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count
               FROM channels_fts
               JOIN channels c ON c.rowid = channels_fts.rowid
               WHERE ${conditions.join(" AND ")}
@@ -391,8 +404,8 @@ const server = Bun.serve({
             const esc = (t) => t.replace(/[\\%_]/g, (m) => `\\${m}`);
             const like = `%${esc(q)}%`;
             channels = status
-              ? db.query(`SELECT * FROM channels WHERE status = ? AND nom LIKE ? ESCAPE '\\' ORDER BY date_ajout DESC LIMIT 200`).all(status, like)
-              : db.query(`SELECT * FROM channels WHERE nom LIKE ? ESCAPE '\\' ORDER BY date_ajout DESC LIMIT 200`).all(like);
+              ? db.query(`SELECT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count FROM channels c WHERE c.status = ? AND c.nom LIKE ? ESCAPE '\\' ORDER BY c.date_ajout DESC LIMIT 200`).all(status, like)
+              : db.query(`SELECT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count FROM channels c WHERE c.nom LIKE ? ESCAPE '\\' ORDER BY c.date_ajout DESC LIMIT 200`).all(like);
           } else {
             channels = [];
           }
@@ -405,6 +418,32 @@ const server = Bun.serve({
           channels = stmts.getChannelsByStatus.all(status);
         } else {
           channels = stmts.getAllChannels.all();
+        }
+
+        // Apply scored/unscored filter (works on top of any status)
+        if (status === "scored") {
+          channels = channels.filter(c => c.llm_score != null);
+        } else if (status === "unscored") {
+          channels = channels.filter(c => c.llm_score == null);
+        }
+
+        // Apply sort (skip for FTS search which already orders by relevance)
+        if (!q && sort !== "date_desc") {
+          const [col, dir] = orderClause.split(" ");
+          const desc = dir === "DESC";
+          channels.sort((a, b) => {
+            let va = a[col.startsWith("c.") ? col.slice(2) : col];
+            let vb = b[col.startsWith("c.") ? col.slice(2) : col];
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            if (typeof va === "string") {
+              va = va.toLowerCase();
+              vb = String(vb || "").toLowerCase();
+              return desc ? vb.localeCompare(va) : va.localeCompare(vb);
+            }
+            return desc ? vb - va : va - vb;
+          });
         }
 
         if (include === "topics,preview") {
@@ -663,7 +702,11 @@ const server = Bun.serve({
             const channels = stmts.getAllChannels.all();
             console.log(`[RefreshStats] Updating ${channels.length} channels...`);
             let updated = 0;
-            for (const ch of channels) {
+            refreshStatsProgress.total = channels.length;
+            refreshStatsProgress.completed = 0;
+            refreshStatsProgress.current = "";
+            refreshStatsProgress.status = "running";
+            await runWithLimit(channels, async (ch) => {
               try {
                 const info = await scrapeChannelInfo(ch.channel_id);
                 if (info.subscriberCount || info.thumbnail || info.name) {
@@ -677,10 +720,13 @@ const server = Bun.serve({
                   updated++;
                 }
               } catch {}
-              await new Promise((r) => setTimeout(r, 300));
-            }
+              refreshStatsProgress.completed++;
+              refreshStatsProgress.current = ch.nom;
+            }, 3, 300);
+            refreshStatsProgress.status = "done";
             console.log(`[RefreshStats] Updated ${updated}/${channels.length} channels`);
           } catch (e) {
+            refreshStatsProgress.status = "error";
             console.error("[RefreshStats] Error:", e.message);
           } finally {
             isRefreshingStats = false;
@@ -690,6 +736,10 @@ const server = Bun.serve({
       },
     },
 
+    "/api/refresh-stats/status": {
+      GET: () => json(refreshStatsProgress),
+    },
+
     "/api/topics": {
       GET: () => json(stmts.getAllTopics.all()),
       POST: async (req) => {
@@ -697,6 +747,15 @@ const server = Bun.serve({
         if (!body.nom) return json({ error: "nom required" }, 400);
         const info = stmts.insertTopic.run({ $nom: body.nom, $description: body.description || "" });
         return json({ ok: true, id: info.lastInsertRowid }, 201);
+      },
+      PATCH: async (req) => {
+        const body = await readBody(req);
+        if (!Array.isArray(body.order)) return json({ error: "order must be an array" }, 400);
+        for (const item of body.order) {
+          if (!Number.isSafeInteger(item.id) || item.id < 1 || !Number.isSafeInteger(item.display_order)) continue;
+          stmts.updateTopicOrder.run(item.display_order, item.id);
+        }
+        return json({ ok: true });
       },
       DELETE: async (req) => {
         const url = new URL(req.url);
@@ -750,10 +809,14 @@ const server = Bun.serve({
       },
     },
 
+    "/api/rss-info": {
+      GET: () => json(getRSSInfo()),
+    },
+
     "/api/llm-status": {
       GET: async () => {
         const status = await checkLLMHealth();
-        return json({ ...status, quota: getQuotaUsage() });
+        return json({ ...status });
       },
     },
 
@@ -931,10 +994,7 @@ const server = Bun.serve({
         return json({ ...scoringProgress });
       }
 
-      // GET /api/quota
-      if (method === "GET" && pathname === "/api/quota") {
-        return json(getQuotaUsage());
-      }
+
 
       // POST /api/channels/resolve-video
       if (method === "POST" && pathname === "/api/channels/resolve-video") {

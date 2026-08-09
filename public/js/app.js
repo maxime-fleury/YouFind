@@ -520,24 +520,42 @@ let _allChannels = [];
 
 async function loadChannels() {
   const list = document.getElementById("channels-list");
-  const savedScrollY = window.scrollY;
-  const listScrollTop = list.scrollTop;
   list.innerHTML = '<div class="text-center py-4"><div class="spinner-glass"></div></div>';
-  document.getElementById("channel-search").value = "";
 
   try {
     const filter = document.getElementById("channel-filter").value;
+    const sort = document.getElementById("channel-sort").value;
     const params = new URLSearchParams({ include: "topics,preview" });
     if (filter) params.set("status", filter);
+    if (sort) params.set("sort", sort);
     _allChannels = await api(`/channels?${params.toString()}`);
+    updateChannelsCount(_allChannels.length);
+    updateChannelsRssBadge();
     renderChannels();
-    requestAnimationFrame(() => {
-      window.scrollTo(0, savedScrollY);
-      list.scrollTop = listScrollTop;
-    });
   } catch (err) {
     console.error("[loadChannels]", err);
     list.innerHTML = '<div class="empty-state"><i class="bi bi-exclamation-triangle"></i><h5>Erreur de chargement</h5><p>' + escapeHtml(err.message) + '</p></div>';
+  }
+}
+
+function updateChannelsCount(count) {
+  const el = document.getElementById("channels-count");
+  if (el) el.textContent = `${count} chaîne${count === 1 ? "" : "s"}`;
+}
+
+async function updateChannelsRssBadge() {
+  const el = document.getElementById("channels-rss-badge");
+  if (!el) return;
+  try {
+    const res = await api("/rss-info");
+    if (res.lastRunAt) {
+      el.innerHTML = `<i class="bi bi-rss"></i> ${formatTimeAgo(res.lastRunAt)}`;
+      el.title = `Dernier refresh RSS: ${new Date(res.lastRunAt).toLocaleString()}`;
+    } else {
+      el.textContent = "";
+    }
+  } catch {
+    el.textContent = "";
   }
 }
 
@@ -598,12 +616,30 @@ const CHANNEL_RENDER_CAP = 200;
 
 function renderChannels(searchQuery, channels = _allChannels) {
   const list = document.getElementById("channels-list");
+  const compact = document.getElementById("channels-compact");
 
   if (searchQuery) {
     const results = channels.map((ch) => ({ ch, ...fuzzyMatch(ch.nom, searchQuery) })).filter((r) => r.match);
     results.sort((a, b) => b.score - a.score);
     channels = results.map((r) => r.ch);
   }
+
+  updateChannelsCount(channels.length);
+
+  // Compact mode
+  if (channelsCompactMode && !searchQuery) {
+    list.classList.add("d-none");
+    compact.classList.remove("d-none");
+    if (channels.length === 0) {
+      compact.innerHTML = '<div class="empty-state"><i class="bi bi-search"></i><h5>Aucune chaine</h5></div>';
+    } else {
+      compact.innerHTML = renderCompactTable(channels);
+    }
+    return;
+  }
+
+  list.classList.remove("d-none");
+  compact.classList.add("d-none");
 
   if (channels.length === 0) {
     list.innerHTML = `
@@ -633,7 +669,9 @@ function renderChannels(searchQuery, channels = _allChannels) {
           </div>
           <div class="ch-meta">
             <span><i class="bi bi-people"></i> ${formatNumber(ch.subscriber_count)} abonnes</span>
+            ${ch.video_count != null ? `<span><i class="bi bi-camera-reels"></i> ${ch.video_count} vidéo${ch.video_count === 1 ? "" : "s"}</span>` : ""}
             <span><i class="bi bi-calendar3"></i> ${formatDate(ch.date_ajout)}</span>
+            ${isNewChannel(ch) ? '<span class="status-badge" style="background:rgba(52,211,153,0.15);color:var(--accent-green);animation:pulse-new 2s ease-in-out infinite">New</span>' : ""}
           </div>
           ${ch.llm_summary || ch.description ? `<div class="llm-summary${ch.llm_summary ? "" : " fallback"}">${escapeHtml(ch.llm_summary || ch.description)}</div>` : ""}
           ${ch.raison_rejet ? `<div class="mt-1" style="font-size:0.78rem;color:var(--accent-red)"><i class="bi bi-x-circle"></i> ${escapeHtml(ch.raison_rejet)}</div>` : ""}
@@ -703,6 +741,64 @@ function renderChannels(searchQuery, channels = _allChannels) {
     renderChannelTopicBadges(ch.id, ch.topics || [], ch.nom);
     if (ch.status === "pending") renderChannelPreview(ch.id, ch.preview_videos || []);
   });
+}
+
+function isNewChannel(ch) {
+  if (!ch.date_ajout) return false;
+  const added = new Date(ch.date_ajout.replace(" ", "T") + (ch.date_ajout.includes("Z") ? "" : "Z"));
+  if (isNaN(added.getTime())) return false;
+  return (Date.now() - added.getTime()) < 24 * 60 * 60 * 1000;
+}
+
+let channelsCompactMode = false;
+
+function toggleChannelsCompact() {
+  channelsCompactMode = !channelsCompactMode;
+  const btn = document.getElementById("channels-compact-btn");
+  if (btn) btn.innerHTML = channelsCompactMode ? '<i class="bi bi-grid-3x3-gap"></i>' : '<i class="bi bi-list-ul"></i>';
+  renderChannels();
+}
+
+function renderCompactTable(channels) {
+  return `
+    <div class="glass-card" style="overflow-x:auto">
+      <table class="compact-channels-table">
+        <thead>
+          <tr>
+            <th>Chaîne</th>
+            <th>Statut</th>
+            <th>Score</th>
+            <th>Abonnés</th>
+            <th>Vidéos</th>
+            <th>Ajoutée</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${channels.slice(0, CHANNEL_RENDER_CAP).map(ch => `
+            <tr class="${isNewChannel(ch) ? 'ch-row-new' : ''}" style="cursor:pointer" onclick="openChannelDetail(${ch.id})">
+              <td>
+                <div class="d-flex align-items-center gap-2">
+                  ${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover">` : ''}
+                  <span class="fw-medium">${escapeHtml(ch.nom)}</span>
+                  ${isNewChannel(ch) ? '<span class="status-badge" style="background:rgba(52,211,153,0.15);color:var(--accent-green);font-size:0.65rem">New</span>' : ''}
+                </div>
+              </td>
+              <td><span class="status-badge ${ch.status}" style="font-size:0.7rem">${ch.status}</span></td>
+              <td>${ch.llm_score != null ? `<span class="llm-score ${ch.llm_score >= 70 ? 'high' : ch.llm_score >= 40 ? 'medium' : 'low'}" style="font-size:0.75rem">${ch.llm_score}/100</span>` : '—'}</td>
+              <td>${formatNumber(ch.subscriber_count)}</td>
+              <td>${ch.video_count ?? '—'}</td>
+              <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(ch.date_ajout)}</td>
+              <td>
+                ${ch.status === 'pending' ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannel(${ch.id})" style="padding:2px 8px;font-size:0.68rem"><i class="bi bi-check-lg"></i></button>` : ''}
+                <button class="btn btn-sm-glass btn-sm" onclick="event.stopPropagation();window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos','_blank')" style="padding:2px 6px;font-size:0.68rem"><i class="bi bi-youtube"></i></button>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+      ${channels.length > CHANNEL_RENDER_CAP ? `<div class="text-center text-muted py-2" style="font-size:0.75rem">${channels.length - CHANNEL_RENDER_CAP} autre${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} chaîne${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} — affines ta recherche</div>` : ''}
+    </div>`;
 }
 
 function downloadTextFile(content, filename, mime) {
@@ -794,8 +890,9 @@ async function loadTopics() {
       return;
     }
 
-    grid.innerHTML = topics.map((t) => `
-      <div class="topic-card-modern">
+    grid.innerHTML = topics.map((t, i) => `
+      <div class="topic-card-modern topic-card" draggable="true" data-topic-id="${t.id}" data-topic-index="${i}">
+        <span class="topic-card-grip" title="Glisser pour réordonner"><i class="bi bi-grip-vertical"></i></span>
         <button class="topic-card-main" type="button" onclick="discoverTopic('${escapeInlineJs(t.nom)}')" title="Explorer ${escapeHtml(t.nom)}">
           <span class="topic-card-icon"><i class="bi bi-hash"></i></span>
           <span class="topic-card-copy"><strong>${escapeHtml(t.nom)}</strong>${t.description ? `<small>${escapeHtml(t.description)}</small>` : ""}</span>
@@ -803,6 +900,8 @@ async function loadTopics() {
         </button>
         <button class="topic-card-delete" type="button" onclick="deleteTopic(${t.id})" title="Supprimer ${escapeHtml(t.nom)}" aria-label="Supprimer ${escapeHtml(t.nom)}"><i class="bi bi-trash3"></i></button>
       </div>`).join("");
+
+    initTopicDragDrop(grid);
   } catch (err) {
     console.error("[loadTopics]", err);
     if (count) count.textContent = "Indisponible";
@@ -838,7 +937,63 @@ async function addTopic() {
   }
 }
 
-async function deleteTopic(id) {
+async function initTopicDragDrop(grid) {
+  let draggedEl = null;
+
+  grid.querySelectorAll('.topic-card').forEach(card => {
+    card.addEventListener('dragstart', (e) => {
+      draggedEl = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', card.dataset.topicId);
+    });
+
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      grid.querySelectorAll('.drag-over').forEach(c => c.classList.remove('drag-over'));
+      draggedEl = null;
+    });
+
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (card !== draggedEl) card.classList.add('drag-over');
+    });
+
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('drag-over');
+    });
+
+    card.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      card.classList.remove('drag-over');
+      if (card === draggedEl || !draggedEl) return;
+
+      const cards = [...grid.querySelectorAll('.topic-card')];
+      const fromIndex = cards.indexOf(draggedEl);
+      const toIndex = cards.indexOf(card);
+      if (fromIndex < 0 || toIndex < 0) return;
+
+      // Reorder DOM
+      if (fromIndex < toIndex) {
+        card.after(draggedEl);
+      } else {
+        card.before(draggedEl);
+      }
+
+      // Save new order to server
+      const newCards = [...grid.querySelectorAll('.topic-card')];
+      const order = newCards.map((c, i) => ({ id: Number(c.dataset.topicId), display_order: i }));
+      try {
+        await api('/topics', { method: 'PATCH', body: JSON.stringify({ order }) });
+      } catch (err) {
+        console.error('[TopicReorder]', err);
+      }
+    });
+  });
+}
+
+function deleteTopic(id) {
   if (!confirm("Supprimer ce topic ?")) return;
   try {
     await api(`/topics?id=${id}`, { method: "DELETE" });
@@ -1798,30 +1953,7 @@ function escapeInlineJs(str) {
   return jsSafe.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function loadQuota() {
-  const valEl = document.getElementById("quota-value");
-  const barEl = document.getElementById("quota-bar");
-  try {
-    const quota = await api("/quota");
-    const used = Number(quota.used);
-    const limit = Number(quota.limit);
-    if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) {
-      if (valEl) valEl.textContent = "Indisponible";
-      if (barEl) barEl.style.width = "0%";
-      return;
-    }
-    const pct = Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
-    const color = pct > 50 ? "var(--accent-red)" : pct > 20 ? "var(--accent-yellow)" : "var(--accent-green)";
-    if (valEl) valEl.innerHTML = `${formatStatCount(used)}<span style="font-size:0.7rem;opacity:0.6"> / ${formatStatCount(limit)}</span>`;
-    if (barEl) {
-      barEl.style.width = `${pct}%`;
-      barEl.style.background = color;
-    }
-  } catch {
-    if (valEl) valEl.textContent = "Indisponible";
-    if (barEl) barEl.style.width = "0%";
-  }
-}
+
 
 async function loadLLMHealth() {
   const badge = document.getElementById("llm-badge");
@@ -1848,10 +1980,11 @@ async function loadLLMHealth() {
 
 // --- Settings ---
 const SETTINGS_KEYS = [
-  "youtube_api_key", "llm_provider",
+  "llm_provider",
   "ollama_url", "ollama_model",
   "lmstudio_url", "lmstudio_model",
   "openrouter_key", "openrouter_model",
+  "llm_concurrency",
 ];
 
 let settingsLoading = false;
@@ -1870,17 +2003,11 @@ function setSettingsSaveState(message, type = "info") {
 function updateSecretState(key, configured) {
   const input = document.getElementById(`set-${key}`);
   const clear = input?.parentElement?.querySelector(".secret-clear");
-  const status = document.getElementById(key === "youtube_api_key" ? "youtube-key-status" : "llm-health");
+  const status = document.getElementById("llm-health");
   if (!input) return;
   input.dataset.configured = configured ? "true" : "false";
-  input.placeholder = configured ? "Clé enregistrée · saisir pour remplacer" : (key === "youtube_api_key" ? "AIza..." : "sk-or-...");
+  input.placeholder = configured ? "Clé enregistrée · saisir pour remplacer" : "sk-or-...";
   clear?.classList.toggle("d-none", !configured && !input.value);
-  if (key === "youtube_api_key" && status) {
-    status.className = `settings-state ${configured ? "configured" : ""}`;
-    status.innerHTML = configured
-      ? '<i class="bi bi-shield-check"></i> Configurée'
-      : '<i class="bi bi-shield-lock"></i> Non configurée';
-  }
 }
 
 function toggleSecret(id, button) {
@@ -1898,7 +2025,6 @@ function clearSecret(id) {
   input.dataset.clear = "true";
   input.dataset.configured = "false";
   input.parentElement?.querySelector(".secret-clear")?.classList.add("d-none");
-  if (id === "set-youtube_api_key") updateSecretState("youtube_api_key", false);
   setSettingsSaveState("La clé sera supprimée après l'enregistrement.", "info");
 }
 
@@ -1922,7 +2048,6 @@ async function loadSettings() {
     toggleLLMFields();
     updateSettingsStatus(settings);
     await loadLLMHealth();
-    loadQuota();
     setSettingsSaveState("Réglages chargés", "success");
   } catch (err) {
     console.error("[loadSettings]", err);
@@ -1938,12 +2063,8 @@ function updateSettingsStatus(settings = {}) {
   if (!status) return;
   const providerLabel = { ollama: "Ollama", lmstudio: "LM Studio", openrouter: "OpenRouter" };
   const provider = providerLabel[settings.llm_provider] || settings.llm_provider || "LLM";
-  const youtube = settings.youtube_api_key_configured
-    ? '<span class="status-ok">Configurée</span>'
-    : '<span class="status-muted">Optionnelle</span>';
   status.innerHTML = `
     <div class="settings-status-row"><span><i class="bi bi-robot"></i> Moteur LLM</span><strong>${escapeHtml(provider)}</strong></div>
-    <div class="settings-status-row"><span><i class="bi bi-collection-play"></i> YouTube API</span><strong>${youtube}</strong></div>
   `;
 }
 
@@ -1965,7 +2086,7 @@ async function testLLMConnection() {
   if (button) { button.disabled = true; button.innerHTML = '<span class="spinner-glass spinner-glass-sm"></span> Test...'; }
   try {
     const status = await api("/llm-status", { timeout: 12000 });
-    updateSettingsStatus({ llm_provider: status.provider, youtube_api_key_configured: document.getElementById("set-youtube_api_key")?.dataset.configured === "true" });
+    updateSettingsStatus({ llm_provider: status.provider });
     if (status.ok) showToast(`${status.provider || "LLM"} est disponible`, "success");
     else showToast(status.error || "Le LLM est indisponible", "error");
     return status;
@@ -1994,7 +2115,7 @@ async function saveSettings() {
   setSettingsSaveState("Enregistrement...", "info");
   try {
     const result = await api("/settings", { method: "POST", body: JSON.stringify(body) });
-    for (const key of ["youtube_api_key", "openrouter_key"]) {
+    for (const key of ["openrouter_key"]) {
       const input = document.getElementById(`set-${key}`);
       if (input) {
         input.value = "";

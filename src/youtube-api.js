@@ -1,115 +1,5 @@
-import { db, stmts, getSetting } from "./db.js";
+import { db, stmts } from "./db.js";
 import { runWithLimit } from "./utils.js";
-
-const API_BASE = "https://www.googleapis.com/youtube/v3";
-
-const QUOTA_COST = {
-  search_list: 100,
-  channels_list: 1,
-};
-
-let quotaUsed = 0;
-let quotaDate = new Date().toDateString();
-
-function resetQuotaIfNeeded() {
-  const today = new Date().toDateString();
-  if (today !== quotaDate) {
-    console.log(`[YT API] Quota reset: was ${quotaUsed}, new day ${today}`);
-    quotaUsed = 0;
-    quotaDate = today;
-  }
-}
-
-function logQuota(operation) {
-  resetQuotaIfNeeded();
-  const cost = QUOTA_COST[operation] || 0;
-  quotaUsed += cost;
-  console.log(`[YT API] ${operation} (+${cost} units) | Total today: ~${quotaUsed}`);
-}
-
-export function getQuotaUsage() {
-  return { used: quotaUsed, limit: 10000 };
-}
-
-export async function searchChannels(query, maxResults = 10) {
-  const apiKey = getSetting("youtube_api_key", "");
-  if (!apiKey) {
-    console.error("[YT API] No YouTube API key configured");
-    return [];
-  }
-
-  logQuota("search_list");
-
-  const params = new URLSearchParams({
-    part: "snippet",
-    type: "channel",
-    q: query,
-    maxResults: String(maxResults),
-    key: apiKey,
-  });
-
-  try {
-    const res = await fetch(`${API_BASE}/search?${params}`);
-    if (!res.ok) {
-      const err = await res.text();
-      if (res.status === 422) {
-        console.error("[YT API] 422 Unprocessable Entity on search.list — likely invalid API key or query:", err);
-      } else {
-        console.error(`[YT API] search.list error: ${res.status}`, err);
-      }
-      return [];
-    }
-    const data = await res.json();
-    return (data.items || []).map((item) => ({
-      channelId: item.id.channelId,
-      nom: item.snippet.title,
-      description: item.snippet.description,
-      thumbnail: item.snippet.thumbnails?.default?.url || "",
-      publishedAt: item.snippet.publishedAt,
-    }));
-  } catch (err) {
-    console.error("[YT API] search error:", err.message);
-    return [];
-  }
-}
-
-export async function getChannelStats(channelIds) {
-  const apiKey = getSetting("youtube_api_key", "");
-  if (!apiKey || !channelIds.length) return [];
-
-  const ids = Array.isArray(channelIds) ? channelIds.join(",") : channelIds;
-
-  logQuota("channels_list");
-
-  const params = new URLSearchParams({
-    part: "statistics,snippet",
-    id: ids,
-    key: apiKey,
-  });
-
-  try {
-    const res = await fetch(`${API_BASE}/channels?${params}`);
-    if (!res.ok) {
-      const err = await res.text().catch(() => "");
-      if (res.status === 422) {
-        console.error("[YT API] 422 Unprocessable Entity on channels.list — likely invalid API key:", err);
-      }
-      return [];
-    }
-    const data = await res.json();
-    return (data.items || []).map((item) => ({
-      channelId: item.id,
-      subscriberCount: parseInt(item.statistics?.subscriberCount || "0"),
-      videoCount: parseInt(item.statistics?.videoCount || "0"),
-      viewCount: parseInt(item.statistics?.viewCount || "0"),
-      thumbnail: item.snippet?.thumbnails?.default?.url || "",
-      country: item.snippet?.country || "",
-    }));
-  } catch (err) {
-    console.error("[YT API] channels.list error:", err.message);
-    return [];
-  }
-}
 
 export function parseChannelInput(input) {
   const trimmed = input.trim();
@@ -773,54 +663,9 @@ export async function discoverFromTopic(topicQuery, maxResults = 20, offset = 0)
     return { channels: inserted, method: "scraping" };
   }
 
-  // Fallback to API only if scraping returned nothing
-  const apiKey = getSetting("youtube_api_key", "");
-  if (!apiKey) {
-    console.log("[Discover] No API key configured, and scraping found nothing. Giving up.");
-    return { channels: [], method: "scraping" };
-  }
-
-  console.log("[Discover] Scraping found nothing, falling back to API...");
-  const channels = await searchChannels(topicQuery, Math.min(maxResults, 50));
-  if (!channels.length) return { channels: [], method: "api" };
-
-  const channelIds = channels.map((c) => c.channelId);
-  const allStats = [];
-  for (let i = 0; i < channelIds.length; i += 20) {
-    const batch = channelIds.slice(i, i + 20);
-    const stats = await getChannelStats(batch);
-    allStats.push(...stats);
-    if (i + 20 < channelIds.length) await new Promise((r) => setTimeout(r, 200));
-  }
-
-  const enriched = channels.map((ch) => {
-    const stats = allStats.find((s) => s.channelId === ch.channelId);
-    return {
-      ...ch,
-      subscriberCount: stats?.subscriberCount || 0,
-      videoCount: stats?.videoCount || 0,
-      thumbnail: stats?.thumbnail || ch.thumbnail,
-      lastVideoDate: null,
-    };
-  });
-
-  const filtered = enriched.filter((ch) => ch.subscriberCount >= 100 && !excludedIds.has(ch.channelId));
-
-  const inserted = [];
-  for (const ch of filtered) {
-    stmts.insertChannel.run({
-      $nom: ch.nom,
-      $channel_id: ch.channelId,
-      $subscriber_count: ch.subscriberCount,
-      $last_video_date: ch.lastVideoDate,
-      $thumbnail: ch.thumbnail,
-      $description: ch.description || "",
-    });
-    inserted.push(ch);
-  }
-
-  console.log(`[Discover] API: ${channels.length} found, ${filtered.length} passed filter, ${inserted.length} added.`);
-  return { channels: inserted, method: "api" };
+  // No API fallback: we stay 100% free scraping only.
+  console.log("[Discover] Scraping found nothing.");
+  return { channels: [], method: "scraping" };
 }
 
 // --- Scraping-based discovery (FREE, zero API cost) ---
@@ -1136,6 +981,11 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
   // `passes` times surfaces more candidates within a single run.
   const validated = [];
   for (let i = 0; i < passes; i++) validated.push(...baseSeeds);
+  // Fisher-Yates shuffle so exploration order is random on every run
+  for (let i = validated.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [validated[i], validated[j]] = [validated[j], validated[i]];
+  }
   const allExisting = db.query(`SELECT channel_id FROM channels`).all();
   const blacklisted = new Set(stmts.getBlacklistedChannelIds.all().map((r) => r.channel_id));
   const existingIds = new Set(allExisting.map((ch) => ch.channel_id));
@@ -1199,7 +1049,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
       completed++;
       onProgress?.(completed, validated.length, ch.nom, "done");
     }
-  }, 3, 500);
+  }, 5, 500);
 
   console.log(`[Related] Found ${results.length} new French channels from ${validated.length} validated channels`);
   return results;

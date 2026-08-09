@@ -131,6 +131,8 @@
     <div id="page-channels" class="page-content d-none">
       <div class="d-flex align-items-center mb-3 flex-wrap gap-2">
         <h2 class="section-title mb-0"><i class="bi bi-collection-play"></i> Mes chaines</h2>
+        <span id="channels-count" class="text-muted" style="font-size:0.82rem;white-space:nowrap"></span>
+        <span id="channels-rss-badge" class="text-muted" style="font-size:0.75rem;white-space:nowrap" title="Dernier refresh RSS"></span>
         <div class="d-flex gap-2 align-items-center" style="flex:1;min-width:200px">
           <div class="search-wrap" style="flex:1">
             <i class="bi bi-search"></i>
@@ -144,8 +146,20 @@
           <option value="pending" selected>En attente</option>
           <option value="validated">Validees</option>
           <option value="rejected">Rejetees</option>
+          <option value="scored">Scorees</option>
+          <option value="unscored">Non scorees</option>
           <option value="">Toutes</option>
         </select>
+        <select id="channel-sort" class="form-select form-select-glass" onchange="loadChannels()" style="width:auto;min-width:130px">
+          <option value="date_desc">Plus recentes</option>
+          <option value="date_asc">Plus anciennes</option>
+          <option value="name">Nom A-Z</option>
+          <option value="score">Score LLM</option>
+          <option value="subs">Abonnes</option>
+        </select>
+        <button class="btn btn-glass btn-sm" onclick="toggleChannelsCompact()" id="channels-compact-btn" title="Vue compacte">
+          <i class="bi bi-list-ul"></i>
+        </button>
         <button class="btn btn-glass" onclick="refreshAllChannelStats()" id="refresh-stats-btn" title="Mettre a jour les stats de toutes les chaines">
           <i class="bi bi-arrow-clockwise"></i> Update stats
         </button>
@@ -163,6 +177,7 @@
         </div>
       </div>
       <div id="channels-list"></div>
+      <div id="channels-compact" class="d-none"></div>
     </div>
 
     <div id="page-discover" class="page-content d-none">
@@ -336,27 +351,6 @@
       <div class="row g-4 settings-layout">
         <div class="col-xl-8">
           <div class="glass-card settings-card p-4 mb-4">
-            <div class="settings-card-heading">
-              <div class="settings-card-icon youtube"><i class="bi bi-youtube"></i></div>
-              <div>
-                <h5 class="mb-1">YouTube Data API</h5>
-                <p class="text-muted mb-0">Optionnelle : utilisée uniquement en secours quand le scraping ne suffit pas.</p>
-              </div>
-              <span id="youtube-key-status" class="settings-state"><i class="bi bi-shield-lock"></i> Non configurée</span>
-            </div>
-            <div class="settings-field mt-4">
-              <label class="form-label" for="set-youtube_api_key">Clé API</label>
-              <div class="secret-input-wrap">
-                <i class="bi bi-key secret-input-icon"></i>
-                <input type="password" id="set-youtube_api_key" class="form-control form-control-glass secret-input" placeholder="AIza..." autocomplete="off" data-secret="true" data-configured="false">
-                <button type="button" class="secret-action" onclick="toggleSecret('set-youtube_api_key', this)" aria-label="Afficher la clé YouTube"><i class="bi bi-eye"></i></button>
-                <button type="button" class="secret-action secret-clear d-none" onclick="clearSecret('set-youtube_api_key')" aria-label="Supprimer la clé YouTube"><i class="bi bi-x-lg"></i></button>
-              </div>
-              <div class="form-text"><i class="bi bi-lock-fill"></i> La valeur existante n'est jamais renvoyée au navigateur. Laisse vide pour la conserver.</div>
-            </div>
-          </div>
-
-          <div class="glass-card settings-card p-4 mb-4">
             <div class="settings-card-heading mb-4">
               <div class="settings-card-icon llm"><i class="bi bi-robot"></i></div>
               <div>
@@ -374,6 +368,15 @@
                 <option value="openrouter">OpenRouter · cloud</option>
               </select>
               <div id="provider-hint" class="provider-hint"><i class="bi bi-lightning-charge"></i> Les données restent sur cet ordinateur.</div>
+
+              <div class="mt-3">
+                <label class="form-label" for="set-llm_concurrency">Scoring parallèle</label>
+                <div class="d-flex align-items-center gap-2">
+                  <input type="range" id="set-llm_concurrency" class="form-range" min="1" max="10" step="1" value="3" style="flex:1" oninput="document.getElementById('llm-concurrency-val').textContent = this.value">
+                  <span id="llm-concurrency-val" class="text-purple-light fw-bold" style="min-width:20px;text-align:center">3</span>
+                </div>
+                <div class="form-text">Nombre de chaînes scorées simultanément par le LLM (1-10). Plus c'est haut, plus c'est rapide mais peut saturer le LLM local.</div>
+              </div>
             </div>
 
             <div class="provider-panel" id="ollama-fields">
@@ -445,15 +448,7 @@
               <div class="settings-status-row"><span><i class="bi bi-robot"></i> Moteur LLM</span><span class="text-muted">En attente</span></div>
               <div class="settings-status-row"><span><i class="bi bi-collection-play"></i> YouTube</span><span class="text-muted">Scraping actif</span></div>
             </div>
-            <div class="settings-quota mt-3" aria-live="polite">
-              <div class="settings-quota-head">
-                <span><i class="bi bi-lightning-charge-fill"></i> Quota YouTube API</span>
-                <strong id="quota-value">--</strong>
-              </div>
-              <div class="settings-quota-track" aria-hidden="true"><div id="quota-bar"></div></div>
-              <small>Requêtes consommées aujourd'hui</small>
-            </div>
-            <button class="btn btn-sm-glass w-100 mt-3" onclick="testLLMConnection();loadQuota()"><i class="bi bi-arrow-repeat"></i> Actualiser le diagnostic</button>
+            <button class="btn btn-sm-glass w-100 mt-3" onclick="testLLMConnection()"><i class="bi bi-arrow-repeat"></i> Actualiser le diagnostic</button>
           </div>
 
           <div class="glass-card settings-card settings-tips p-4">

@@ -293,6 +293,8 @@ async function scoreChannelList(channels, onProgress) {
   let failed = 0;
   onProgress?.({ total: channels.length, completed: 0, scored: 0, failed: 0, failures: [], current: "" });
 
+  const concurrency = Math.max(1, Math.min(10, Number(getSetting("llm_concurrency", "3")) || 3));
+
   await runWithLimit(
     channels,
     async (ch) => {
@@ -315,7 +317,7 @@ async function scoreChannelList(channels, onProgress) {
         current: ch.nom,
       });
     },
-    3,
+    concurrency,
     1000
   );
   return results;

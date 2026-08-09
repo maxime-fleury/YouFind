@@ -2037,3 +2037,68 @@ mark {
   .player-wrap { width: 100vw; }
   .player-close { top: -40px; }
 }
+
+/* --- New badge animation --- */
+@keyframes pulse-new {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* --- Compact channels table --- */
+.compact-channels-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.compact-channels-table thead th {
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+.compact-channels-table tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  white-space: nowrap;
+}
+.compact-channels-table tbody tr:hover {
+  background: rgba(124, 58, 237, 0.06);
+}
+.compact-channels-table tbody tr.ch-row-new {
+  background: rgba(52, 211, 153, 0.04);
+}
+
+/* --- Drag & drop topics --- */
+.topic-card {
+  cursor: grab;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.topic-card:active {
+  cursor: grabbing;
+}
+.topic-card.dragging {
+  opacity: 0.5;
+  transform: scale(0.98);
+}
+.topic-card.drag-over {
+  box-shadow: 0 0 0 2px var(--purple-500);
+  transform: scale(1.02);
+}
+.topic-card-grip {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--text-muted);
+  cursor: grab;
+  font-size: 1rem;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.topic-card-grip:hover { opacity: 1; }
+.topic-card-grip:active { cursor: grabbing; }
