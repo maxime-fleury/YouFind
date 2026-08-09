@@ -2121,16 +2121,32 @@ function updateRelatedProgress(data) {
   }
 }
 
-// Run a single pass of the related exploration, streaming results into the
-// results container. Returns { found, lastStatus } once the pass completes.
-async function runRelatedPass({ status, results, passLabel }) {
+// Run the related exploration once, streaming results into the container.
+// `passes` duplicates each validated channel in the seed list so every channel
+// is scraped `passes` times (Google's suggestions vary between fetches).
+async function runRelatedPass({ status, results, passes }) {
   let cursor = 0;
   let lastStatus = null;
   let jobId = "";
   let pollFailures = 0;
   const pollingDeadline = Date.now() + 2 * 60 * 60 * 1000;
+  const multi = (passes || 1) > 1;
 
-  const started = await api("/discover/related", { method: "POST", timeout: 30000 });
+  const startJob = () => api("/discover/related", {
+    method: "POST",
+    body: JSON.stringify({ passes: passes || 1 }),
+    timeout: 30000,
+  });
+
+  // The server rejects a second job while one is still releasing its lock.
+  let started;
+  try {
+    started = await startJob();
+  } catch (err) {
+    if (!/in progress|409/i.test(err.message)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    started = await startJob();
+  }
   jobId = started.jobId || "";
   if (!jobId) throw new Error("Impossible d'identifier l'exploration");
 
@@ -2152,7 +2168,7 @@ async function runRelatedPass({ status, results, passLabel }) {
     if (Array.isArray(data.results) && data.results.length > 0) {
       results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
       cursor = data.next;
-      status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${passLabel ? `Passage ${passLabel} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+      status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${multi ? `Exploration x${passes} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
     }
 
     if (data.status === "done") {
@@ -2176,7 +2192,7 @@ async function runRelatedDiscovery() {
   const badge = document.getElementById("related-badge");
 
   const runsInput = document.getElementById("related-runs");
-  const totalRuns = Math.max(1, Math.min(10, parseInt(runsInput?.value || "1", 10) || 1));
+  const passes = Math.max(1, Math.min(10, parseInt(runsInput?.value || "1", 10) || 1));
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-glass"></span> Exploration...';
@@ -2189,20 +2205,11 @@ async function runRelatedDiscovery() {
   let lastStatus = null;
 
   try {
-    for (let run = 1; run <= totalRuns; run++) {
-      const passLabel = totalRuns > 1 ? `${run} / ${totalRuns}` : "";
-      if (passLabel) {
-        status.innerHTML = `<span class="related-live-status"><i class="bi bi-repeat"></i> Passage ${passLabel} — exploration en cours...</span>`;
-      }
+    const pass = await runRelatedPass({ status, results, passes });
+    lastStatus = pass.lastStatus;
 
-      const pass = await runRelatedPass({ status, results, passLabel });
-      lastStatus = pass.lastStatus;
-
-      // A pass that found nothing new won't be helped by another pass.
-      if (pass.found === 0) {
-        status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
-        break;
-      }
+    if (pass.found === 0) {
+      status.innerHTML = '<p class="text-muted" style="font-size:0.88rem">Aucune nouvelle chaine similaire trouvee. Ajoute plus de chaines validees pour enrichir la decouverte.</p>';
     }
     loadStats();
     scoreAllUnscored("related-score");

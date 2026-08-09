@@ -805,6 +805,9 @@ const server = Bun.serve({
           return json({ error: "Related discovery already in progress" }, 409);
         }
 
+        const body = await readBody(req);
+        const passes = Math.max(1, Math.min(10, Number(body?.passes) || 1));
+
         isRelatedRunning = true;
         relatedJobId = createJobId();
         relatedProgress.total = 0;
@@ -830,7 +833,8 @@ const server = Bun.serve({
             // Auto-ingest videos (free) so newly found channels have videos right
             // away, matching the Discover page workflow.
             ingestChannel(result.channelId).catch(() => {});
-          }
+          },
+          { passes }
         )
           .then(() => {
             relatedProgress.status = "done";

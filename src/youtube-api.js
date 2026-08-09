@@ -1127,8 +1127,12 @@ function isLikelyFrench(html) {
 
 // --- Related channel discovery from validated channels ---
 
-export async function discoverRelatedFromValidated(onProgress, onResult) {
-  const validated = db.query(`SELECT channel_id, nom FROM channels WHERE status = 'validated'`).all();
+export async function discoverRelatedFromValidated(onProgress, onResult, { passes = 1 } = {}) {
+  const baseSeeds = db.query(`SELECT channel_id, nom FROM channels WHERE status = 'validated'`).all();
+  // Google's recommendations vary between fetches, so scraping each channel
+  // `passes` times surfaces more candidates within a single run.
+  const validated = [];
+  for (let i = 0; i < passes; i++) validated.push(...baseSeeds);
   const allExisting = db.query(`SELECT channel_id FROM channels`).all();
   const blacklisted = new Set(stmts.getBlacklistedChannelIds.all().map((r) => r.channel_id));
   const existingIds = new Set(allExisting.map((ch) => ch.channel_id));
