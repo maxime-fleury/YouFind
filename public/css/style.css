@@ -1142,7 +1142,7 @@ main, nav, .modal-content {
 .discover-empty-results p, .topics-empty p { font-size: 0.78rem; }
 .discover-empty-results.error, .topics-empty.error { border-color: rgba(248, 113, 113, 0.3); }
 .discover-empty-results.error i, .topics-empty.error i { color: var(--accent-red); }
-.topics-grid-modern { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.topics-grid-modern { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .topic-card-modern {
   display: flex;
   align-items: stretch;
@@ -1153,10 +1153,10 @@ main, nav, .modal-content {
   transition: border-color 0.2s, background 0.2s, transform 0.2s;
 }
 .topic-card-modern:hover { border-color: rgba(168, 85, 247, 0.42); background: rgba(139, 92, 246, 0.1); transform: translateY(-1px); }
-.topic-card-main { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1; padding: 12px; border: 0; color: inherit; background: transparent; text-align: left; }
+.topic-card-main { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; padding: 10px; border: 0; color: inherit; background: transparent; text-align: left; }
 .topic-card-icon { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 9px; color: var(--purple-300); background: rgba(139, 92, 246, 0.16); }
 .topic-card-copy { display: flex; flex-direction: column; min-width: 0; }
-.topic-card-copy strong { overflow: hidden; color: var(--text-primary); font-size: 0.82rem; text-overflow: ellipsis; white-space: nowrap; }
+.topic-card-copy strong { overflow: hidden; color: var(--text-primary); font-size: 0.84rem; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .topic-card-copy small { overflow: hidden; color: var(--text-muted); font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
 .topic-card-arrow { margin-left: auto; color: var(--text-muted); font-size: 0.78rem; transition: transform 0.2s; }
 .topic-card-main:hover .topic-card-arrow { color: var(--purple-300); transform: translate(2px, -2px); }
@@ -2093,11 +2093,11 @@ mark {
 .topic-card-grip {
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 2px;
   color: var(--text-muted);
   cursor: grab;
-  font-size: 1rem;
-  opacity: 0.5;
+  font-size: 0.8rem;
+  opacity: 0.4;
   transition: opacity 0.15s;
 }
 .topic-card-grip:hover { opacity: 1; }
