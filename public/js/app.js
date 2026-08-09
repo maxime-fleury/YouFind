@@ -401,6 +401,7 @@ async function loadVideos(reset = true) {
   const topicFilter = document.getElementById("video-topic-filter")?.value || "";
   const sort = document.getElementById("video-sort")?.value || "newest";
   const search = document.getElementById("video-search")?.value.trim() || "";
+  const savedScrollY = window.scrollY;
 
   if (reset) {
     videoOffset = 0;
@@ -455,8 +456,12 @@ async function loadVideos(reset = true) {
     const seenSet = getSeenVideos();
     const html = videos.map((v) => renderVideoCard(v, seenSet)).join("");
 
-    if (reset) grid.innerHTML = html;
-    else grid.insertAdjacentHTML("beforeend", html);
+    if (reset) {
+      grid.innerHTML = html;
+      requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
+    } else {
+      grid.insertAdjacentHTML("beforeend", html);
+    }
 
     videoOffset += videos.length;
 
