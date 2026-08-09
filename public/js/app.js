@@ -1,3 +1,6 @@
+// ═══════════════════════════════════════════
+//  STATE — Global mutable state
+// ═══════════════════════════════════════════
 let currentPage = localStorage.getItem("youfind-page") || "videos";
 let rejectChannelId = null;
 let resolvedChannelData = null;
@@ -34,6 +37,9 @@ document.querySelectorAll("[data-page]").forEach((btn) => {
   });
 });
 
+// ═══════════════════════════════════════════
+//  NAVIGATION & API
+// ═══════════════════════════════════════════
 function navigateTo(page) {
   currentPage = page;
   localStorage.setItem("youfind-page", page);
@@ -76,6 +82,9 @@ async function api(path, opts = {}) {
   }
 }
 
+// ═══════════════════════════════════════════
+//  UTILITIES — Formatting & Toast
+// ═══════════════════════════════════════════
 function formatNumber(n) {
   if (!n) return "0";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
@@ -144,6 +153,9 @@ function formatStatCount(value) {
   return (n / 1_000_000).toFixed(1).replace(".", ",") + "M+";
 }
 
+// ═══════════════════════════════════════════
+//  PAGE: Stats
+// ═══════════════════════════════════════════
 function renderStatsLoading(container) {
   container.innerHTML = `
     <div class="col-12">
@@ -332,6 +344,9 @@ async function loadStats() {
   }
 }
 
+// ═══════════════════════════════════════════
+//  PAGE: Videos
+// ═══════════════════════════════════════════
 function renderVideoCard(v, seenSet) {
   const seenClass = seenSet.has(v.url) ? "seen" : "";
   const thumbnailUrl = safeImageUrl(v.thumbnail);
@@ -524,6 +539,9 @@ function ensureVideoScrollTrigger(grid) {
   videoObserver.observe(trigger);
 }
 
+// ═══════════════════════════════════════════
+//  PAGE: Channels
+// ═══════════════════════════════════════════
 let _allChannels = [];
 
 async function loadChannels() {
@@ -859,6 +877,9 @@ async function exportChannels(format) {
   }
 }
 
+// ═══════════════════════════════════════════
+//  PAGE: Discover & Scoring
+// ═══════════════════════════════════════════
 let isDiscovering = false;
 
 function updateDiscoverInputState() {
@@ -1751,6 +1772,9 @@ async function saveChannelTopics() {
   }
 }
 
+// ═══════════════════════════════════════════
+//  COMPONENTS: Topic System
+// ═══════════════════════════════════════════
 let _cachedTopics = null;
 let _cachedTopicsJson = "";
 
@@ -1781,6 +1805,9 @@ async function populateTopicFilter(force = false) {
 
 
 
+// ═══════════════════════════════════════════
+//  UTILITIES: Sanitization & Watched Videos
+// ═══════════════════════════════════════════
 function escapeHtml(str) {
   if (!str) return "";
   const div = document.createElement("div");
@@ -1897,6 +1924,9 @@ function extractVideoId(url) {
   return fallback?.length === 11 ? fallback : null;
 }
 
+// ═══════════════════════════════════════════
+//  COMPONENTS: YouTube Player
+// ═══════════════════════════════════════════
 let ytPlayer = null;
 let ytReady = false;
 let ytCallbacks = [];
@@ -2068,6 +2098,9 @@ function escapeJs(str) {
 // For embedding user data in onclick="..." attributes (double context: HTML + JS):
 // 1. JS-escape first (handles ', \, newlines within JS string literals)
 // 2. Then HTML-escape (handles " that would break the HTML attribute, &, <, >)
+// ═══════════════════════════════════════════
+//  PAGE: Settings
+// ═══════════════════════════════════════════
 function escapeInlineJs(str) {
   if (!str) return "";
   const jsSafe = str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/`/g, "\\`");
@@ -2311,6 +2344,9 @@ async function batchImport() {
 
 // --- Related Channels Discovery ---
 
+// ═══════════════════════════════════════════
+//  PAGE: Related Channels
+// ═══════════════════════════════════════════
 let isRelatedRunning = false;
 let relatedJobId = null;
 
@@ -2558,6 +2594,9 @@ channelDetailModal._element.addEventListener("hidden.bs.modal", () => {
   detailPrefetch = null;
 });
 
+// ═══════════════════════════════════════════
+//  COMPONENTS: Channel Detail Modal & Triage
+// ═══════════════════════════════════════════
 async function openChannelDetail(id, opts = {}) {
   // Starting a fresh triage session unless we are advancing inside the queue.
   if (!opts.keepQueue) {
@@ -2802,6 +2841,9 @@ async function addRelatedChannel(channelId, nom) {
 }
 
 // --- Channel Preview (3 recent videos for pending channels) ---
+// ═══════════════════════════════════════════
+//  COMPONENTS: Channel Preview & Add Modal
+// ═══════════════════════════════════════════
 function renderChannelPreview(channelId, videos) {
   const container = document.getElementById(`ch-preview-${channelId}`);
   if (!container) return;

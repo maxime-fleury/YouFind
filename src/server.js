@@ -6,9 +6,11 @@ import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, ch
 import { runWithLimit } from "./utils.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
 
+// ═══ CONFIG ═══
 const PORT = parseInt(Bun.env.PORT || "3000");
 const HOST = Bun.env.HOST || "127.0.0.1";
 
+// ═══ HTTP HELPERS ═══
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
@@ -51,6 +53,7 @@ async function readBody(req) {
   }
 }
 
+// ═══ STATIC FILE SERVING ═══
 const ROOT_DIR = dirname(import.meta.dir);
 const PUBLIC_DIR = resolve(join(ROOT_DIR, "public"));
 
@@ -86,46 +89,34 @@ function serveStatic(pathname) {
   return null;
 }
 
+// ═══ PROGRESS TRACKER FACTORY ═══
+function createJobId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createProgressTracker(fields = {}) {
+  return { total: 0, completed: 0, current: "", status: "idle", ...fields };
+}
+
+// ═══ SHARED STATE (mutable, accessed by route handlers) ═══
 let isRefreshingRSS = false;
 let isRefreshingVideos = false;
 let isRefreshingPendingVideos = false;
 let isRefreshingStats = false;
 let isScoring = false;
 let scoringJobId = null;
-const scoringProgress = {
-  jobId: null,
-  mode: "",
-  total: 0,
-  completed: 0,
-  scored: 0,
-  failed: 0,
-  failures: [],
-  current: "",
-  status: "idle",
-  error: "",
-};
+const scoringProgress = createProgressTracker({ jobId: null, mode: "", scored: 0, failed: 0, failures: [], error: "" });
 let isRelatedRunning = false;
 let relatedJobId = null;
 let relatedAbortController = null;
 let relatedPaused = false;
-const refreshProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
-const refreshVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
-const pendingVideosProgress = { total: 0, completed: 0, errors: 0, current: "", status: "idle" };
-const refreshStatsProgress = { total: 0, completed: 0, current: "", status: "idle" };
-const relatedProgress = {
-  total: 0,
-  completed: 0,
-  found: 0,
-  current: "",
-  status: "idle",
-  results: [],
-  error: "",
-};
+const refreshProgress = createProgressTracker({ errors: 0 });
+const refreshVideosProgress = createProgressTracker({ errors: 0 });
+const pendingVideosProgress = createProgressTracker({ errors: 0 });
+const refreshStatsProgress = createProgressTracker();
+const relatedProgress = createProgressTracker({ found: 0, results: [], error: "" });
 
-function createJobId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
+// ═══ RATE LIMITER ═══
 // Simple in-memory rate limiter: 120 requests per minute per IP
 const RATE_LIMIT = 120;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -154,6 +145,7 @@ function checkRateLimit(req) {
   return true;
 }
 
+// ═══ SCORING JOB HELPERS ═══
 async function runScoringJob(job) {
   if (isScoring) {
     return json({ error: "A scoring job is already in progress" }, 409);
@@ -209,6 +201,7 @@ function startScoringJob(mode, scorer) {
   return scoringJobId;
 }
 
+// ═══ VALIDATION HELPERS ═══
 function parsePositiveId(value) {
   if (typeof value !== "string" && typeof value !== "number") return null;
   const text = String(value).trim();
@@ -221,6 +214,9 @@ function isYoutubeChannelId(value) {
   return typeof value === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(value.trim());
 }
 
+// ═══════════════════════════════════════════
+//  ROUTE HANDLERS
+// ═══════════════════════════════════════════
 const server = Bun.serve({
   port: PORT,
   hostname: HOST,
@@ -945,6 +941,9 @@ const server = Bun.serve({
     },
   },
 
+  // ═══════════════════════════════════════════
+  //  FETCH HANDLER (non-standard routes + static files)
+  // ═══════════════════════════════════════════
   async fetch(req) {
     const url = new URL(req.url);
     const pathname = url.pathname;
@@ -1257,6 +1256,9 @@ const server = Bun.serve({
     return new Response("Not Found", { status: 404 });
   },
 
+  // ═══════════════════════════════════════════
+  //  ERROR HANDLER
+  // ═══════════════════════════════════════════
   error(error) {
     console.error("[Server]", error);
     return new Response(JSON.stringify({ error: error.message }), {
@@ -1268,5 +1270,6 @@ const server = Bun.serve({
 
 console.log(`\n  YouFind running at http://localhost:${server.port}\n`);
 
+// ═══ STARTUP ═══
 // Start cron scheduler for automated tasks
 startCron();
