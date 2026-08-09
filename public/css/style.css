@@ -2142,3 +2142,12 @@ mark {
 }
 .topic-card-grip:hover { opacity: 1; }
 .topic-card-grip:active { cursor: grabbing; }
+
+/* --- Page transition --- */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-content:not(.d-none) {
+  animation: page-in 0.2s ease-out;
+}

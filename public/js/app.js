@@ -886,6 +886,7 @@ function useDiscoverySuggestion(topic) {
 }
 
 async function loadTopics() {
+  _cachedTopics = null; // invalidate topic filter cache
   const grid = document.getElementById("topics-grid");
   const count = document.getElementById("topics-count");
   if (!grid) return;
@@ -1773,15 +1774,27 @@ async function saveChannelTopics() {
   }
 }
 
-async function populateTopicFilter() {
+let _cachedTopics = null;
+let _cachedTopicsJson = "";
+
+async function populateTopicFilter(force = false) {
   const select = document.getElementById("video-topic-filter");
   if (!select) return;
   const currentVal = select.value;
   try {
-    const topics = await api("/topics");
+    // Use cache unless forced or not yet loaded
+    if (!force && _cachedTopics) {
+      select.innerHTML = '<option value="">Tous les topics</option>' +
+        '<option value="0"' + (currentVal === "0" ? " selected" : "") + '>Sans topic</option>' +
+        _cachedTopics.map((t) => `<option value="${t.id}" ${currentVal == t.id ? "selected" : ""}>${escapeHtml(t.nom)}</option>`).join("");
+      select.onchange = () => loadVideos(true);
+      return;
+    }
+    _cachedTopics = await api("/topics");
+    _cachedTopicsJson = JSON.stringify(_cachedTopics);
     select.innerHTML = '<option value="">Tous les topics</option>' +
       '<option value="0"' + (currentVal === "0" ? " selected" : "") + '>Sans topic</option>' +
-      topics.map((t) => `<option value="${t.id}" ${currentVal == t.id ? "selected" : ""}>${escapeHtml(t.nom)}</option>`).join("");
+      _cachedTopics.map((t) => `<option value="${t.id}" ${currentVal == t.id ? "selected" : ""}>${escapeHtml(t.nom)}</option>`).join("");
     select.onchange = () => loadVideos(true);
   } catch {
     select.innerHTML = '<option value="">Tous les topics</option>';
@@ -2714,6 +2727,17 @@ async function showNextInQueue() {
   await openChannelDetail(next.id, { keepQueue: true });
 }
 
+// Remove a channel from the local cache and re-render without API call.
+function removeChannelFromCache(channelId) {
+  _allChannels = _allChannels.filter(c => c.id !== channelId);
+  if (detailQueue) {
+    detailQueue = detailQueue.filter(c => c.id !== channelId);
+    detailQueueIndex = detailQueue.findIndex(c => c.id === currentDetailChannel?.id);
+  }
+  updateChannelsCount(_allChannels.length);
+  renderChannels();
+}
+
 // Modal footer: validate the current channel, then open the next pending one.
 async function acceptCurrentAndNext() {
   if (!currentDetailChannel) return;
@@ -2721,7 +2745,8 @@ async function acceptCurrentAndNext() {
     await ensureDetailQueue();
     await api(`/channels/${currentDetailChannel.id}/validate`, { method: "POST" });
     showToast("Chaine validee !", "success");
-    loadChannels();
+    const validatedId = currentDetailChannel.id;
+    removeChannelFromCache(validatedId);
     loadStats();
     await showNextInQueue();
   } catch (err) {
@@ -2741,7 +2766,8 @@ async function openRejectAndNext() {
       body: JSON.stringify({ raison }),
     });
     showToast("Chaine rejetee: " + raison, "info");
-    loadChannels();
+    const rejectedId = currentDetailChannel.id;
+    removeChannelFromCache(rejectedId);
     loadStats();
     await showNextInQueue();
   } catch (err) {
