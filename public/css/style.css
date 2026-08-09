@@ -1810,8 +1810,11 @@ main, nav, .modal-content {
 /* --- Dashboard styles --- */
 /* --- Channel detail modal --- */
 #channelDetailModal .modal-body {
-  max-height: 60vh;
+  max-height: 78vh;
   overflow-y: auto;
+}
+#channelDetailModal .modal-dialog {
+  max-width: 1400px;
 }
 #detail-ch-videos .video-card {
   border-radius: 10px;
@@ -1984,7 +1987,7 @@ mark {
 .player-backdrop.open { opacity: 1; pointer-events: auto; }
 
 .player-wrap {
-  width: min(960px, 94vw);
+  width: min(1280px, 92vw);
   transform: scale(.92) translateY(18px);
   opacity: 0;
   transition: transform .4s cubic-bezier(.2,.9,.25,1.3), opacity .4s ease;
@@ -2064,6 +2067,11 @@ mark {
 }
 .player-close:hover { background: rgba(139, 92, 246, 0.4); transform: rotate(90deg); }
 
+@media (min-width: 1600px) {
+  .player-wrap { width: min(1440px, 88vw); }
+  #channelDetailModal .modal-dialog { max-width: 1600px; }
+  #channelDetailModal .modal-body { max-height: 82vh; }
+}
 @media (max-width: 640px) {
   .player-backdrop { padding: 8px; }
   .player-wrap { width: 100vw; }
