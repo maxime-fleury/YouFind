@@ -313,6 +313,24 @@ const stmts = {
     INSERT OR IGNORE INTO channels (nom, channel_id, subscriber_count, last_video_date, thumbnail, description)
     VALUES ($nom, $channel_id, $subscriber_count, $last_video_date, $thumbnail, $description)
   `),
+  upsertImportedChannel: db.prepare(`
+    INSERT INTO channels
+      (nom, channel_id, status, date_ajout, raison_rejet, subscriber_count, last_video_date, llm_summary, llm_score, thumbnail, description, last_refresh)
+    VALUES
+      ($nom, $channel_id, $status, $date_ajout, $raison_rejet, $subscriber_count, $last_video_date, $llm_summary, $llm_score, $thumbnail, $description, $last_refresh)
+    ON CONFLICT(channel_id) DO UPDATE SET
+      nom = excluded.nom,
+      status = excluded.status,
+      date_ajout = excluded.date_ajout,
+      raison_rejet = excluded.raison_rejet,
+      subscriber_count = excluded.subscriber_count,
+      last_video_date = excluded.last_video_date,
+      llm_summary = excluded.llm_summary,
+      llm_score = excluded.llm_score,
+      thumbnail = excluded.thumbnail,
+      description = excluded.description,
+      last_refresh = excluded.last_refresh
+  `),
 
   getChannelByYoutubeId: db.prepare(`SELECT * FROM channels WHERE channel_id = ?`),
   getChannelsByStatus: db.prepare(`SELECT c.*, (SELECT COUNT(*) FROM videos v WHERE v.channel_id = c.channel_id) as video_count FROM channels c WHERE c.status = ? ORDER BY c.date_ajout DESC`),
@@ -339,14 +357,41 @@ const stmts = {
   deleteChannel: db.prepare(`DELETE FROM channels WHERE id = ?`),
 
   insertVideo: db.prepare(`
-    INSERT OR IGNORE INTO videos (channel_id, titre, description, url, thumbnail, date_pub, vues, duration)
+    INSERT INTO videos (channel_id, titre, description, url, thumbnail, date_pub, vues, duration)
     VALUES ($channel_id, $titre, $description, $url, $thumbnail, $date_pub, $vues, $duration)
+    ON CONFLICT(url) DO UPDATE SET
+      titre = CASE WHEN excluded.titre != '' THEN excluded.titre ELSE videos.titre END,
+      description = CASE WHEN excluded.description != '' THEN excluded.description ELSE videos.description END,
+      thumbnail = CASE WHEN excluded.thumbnail != '' THEN excluded.thumbnail ELSE videos.thumbnail END,
+      date_pub = COALESCE(excluded.date_pub, videos.date_pub),
+      vues = CASE WHEN excluded.vues > 0 THEN excluded.vues ELSE videos.vues END,
+      duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE videos.duration END
+  `),
+
+  upsertImportedVideo: db.prepare(`
+    INSERT INTO videos (channel_id, titre, description, url, thumbnail, date_pub, vues, duration)
+    VALUES ($channel_id, $titre, $description, $url, $thumbnail, $date_pub, $vues, $duration)
+    ON CONFLICT(url) DO UPDATE SET
+      channel_id = excluded.channel_id,
+      titre = excluded.titre,
+      description = excluded.description,
+      thumbnail = excluded.thumbnail,
+      date_pub = excluded.date_pub,
+      vues = excluded.vues,
+      duration = excluded.duration
   `),
 
   getVideos: db.prepare(`SELECT v.*, c.nom as channel_nom FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND v.duration > 60 ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
   getVideosByChannel: db.prepare(`SELECT v.* FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE v.channel_id = ? AND c.status = 'validated' AND v.duration > 60 ORDER BY v.date_pub DESC LIMIT ? OFFSET ?`),
   getVideoByUrl: db.prepare(`SELECT id, duration FROM videos WHERE url = ?`),
   updateVideoDuration: db.prepare(`UPDATE videos SET duration = $duration WHERE url = $url`),
+  getAllVideos: db.prepare(`SELECT * FROM videos ORDER BY id ASC`),
+  getAllChannelTopics: db.prepare(`SELECT channel_id, topic_id FROM channel_topics ORDER BY channel_id, topic_id`),
+  getAllFeedback: db.prepare(`SELECT * FROM feedback_log ORDER BY id ASC`),
+  insertFeedbackExport: db.prepare(`
+    INSERT INTO feedback_log (channel_id, channel_nom, decision, raison, date_decision)
+    VALUES ($channel_id, $channel_nom, $decision, $raison, COALESCE($date_decision, datetime('now')))
+  `),
   updateChannelLastRefresh: db.prepare(`UPDATE channels SET last_refresh = ? WHERE channel_id = ?`),
 
   insertTopic: db.prepare(`INSERT INTO topics (nom, description) VALUES ($nom, $description)`),
@@ -378,7 +423,7 @@ const stmts = {
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending_channels,
       SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_channels,
       (SELECT COUNT(*) FROM feedback_log WHERE decision = 'rejected') as rejected_feedback_events,
-      ROUND(100.0 * SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN status != 'validated' THEN 1 ELSE 0 END), 0), 1) as validated_channel_ratio,
+      ROUND(100.0 * SUM(CASE WHEN status = 'validated' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) as validated_channel_ratio,
       (SELECT COUNT(*) FROM videos v JOIN channels c ON v.channel_id = c.channel_id WHERE c.status = 'validated' AND v.duration > 60) as total_videos,
       (SELECT COUNT(*) FROM topics) as total_topics
     FROM channels

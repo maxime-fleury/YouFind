@@ -4,6 +4,7 @@ import { ingestChannel, refreshAllChannels, refreshAllVideos, refreshPendingWith
 import { discoverFromTopic, resolveChannel, scrapeChannelInfo, resolveFromVideoUrl, scrapeRelatedChannels, extractChannelIdsFromText, discoverRelatedFromValidated } from "./youtube-api.js";
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
 import { runWithLimit } from "./utils.js";
+import { createJobId, createProgressTracker, resetProgressTracker } from "./job-utils.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
 
 // ═══ CONFIG ═══
@@ -11,11 +12,15 @@ const PORT = parseInt(Bun.env.PORT || "3000");
 const HOST = Bun.env.HOST || "127.0.0.1";
 
 // ═══ HTTP HELPERS ═══
+const CORS_ORIGIN = Bun.env.CORS_ORIGIN || `http://${HOST}:${PORT}`;
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": CORS_ORIGIN,
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Vary": "Origin",
 };
+// Backups can legitimately contain the full local video catalog.
+const MAX_JSON_BODY_BYTES = 128 * 1024 * 1024;
 
 const SETTINGS_KEYS = new Set([
   "llm_provider",
@@ -46,9 +51,24 @@ function json(data, status = 200) {
 }
 
 async function readBody(req) {
+  const declaredLength = Number(req.headers.get("content-length") || 0);
+  if (declaredLength > MAX_JSON_BODY_BYTES) {
+    const error = new Error("Request body too large");
+    error.status = 413;
+    throw error;
+  }
   try {
-    return await req.json();
-  } catch {
+    const text = await req.text();
+    if (text.length > MAX_JSON_BODY_BYTES) {
+      const error = new Error("Request body too large");
+      error.status = 413;
+      throw error;
+    }
+    if (!text.trim()) return {};
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    if (error.status === 413) throw error;
     return {};
   }
 }
@@ -87,15 +107,6 @@ function serveStatic(pathname) {
     });
   }
   return null;
-}
-
-// ═══ PROGRESS TRACKER FACTORY ═══
-function createJobId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function createProgressTracker(fields = {}) {
-  return { total: 0, completed: 0, current: "", status: "idle", ...fields };
 }
 
 // ═══ SHARED STATE (mutable, accessed by route handlers) ═══
@@ -163,16 +174,14 @@ function startScoringJob(mode, scorer) {
 
   isScoring = true;
   scoringJobId = createJobId();
-  scoringProgress.jobId = scoringJobId;
-  scoringProgress.mode = mode;
-  scoringProgress.total = 0;
-  scoringProgress.completed = 0;
-  scoringProgress.scored = 0;
-  scoringProgress.failed = 0;
-  scoringProgress.failures = [];
-  scoringProgress.current = "";
-  scoringProgress.status = "running";
-  scoringProgress.error = "";
+  resetProgressTracker(scoringProgress, {
+    jobId: scoringJobId,
+    mode,
+    scored: 0,
+    failed: 0,
+    failures: [],
+    error: "",
+  });
 
   Promise.resolve()
     .then(() => scorer((progress) => {
@@ -313,7 +322,9 @@ const server = Bun.serve({
     "/api/channels/resolve": {
       POST: async (req) => {
         const body = await readBody(req);
-        if (!body.input) return json({ error: "input required" }, 400);
+        if (typeof body.input !== "string" || !body.input.trim() || body.input.length > 2000) {
+          return json({ error: "input must be a non-empty string" }, 400);
+        }
 
         const result = await resolveChannel(body.input);
         if (!result) return json({ error: "Channel not found" }, 404);
@@ -533,6 +544,7 @@ const server = Bun.serve({
         const id = parsePositiveId(req.params.id);
         if (!id) return json({ error: "Invalid channel id" }, 400);
         const body = await readBody(req);
+        const rejectionReason = typeof body.raison === "string" ? body.raison.trim().slice(0, 1000) : "";
 
         const ch = db.query(`SELECT channel_id, nom FROM channels WHERE id = ?`).get(id);
         if (!ch) return json({ error: "Channel not found" }, 404);
@@ -542,10 +554,10 @@ const server = Bun.serve({
             $channel_id: ch.channel_id,
             $channel_nom: ch.nom,
             $decision: "rejected",
-            $raison: body.raison || "",
+            $raison: rejectionReason,
           });
           stmts.deleteChannelVideos.run(ch.channel_id);
-          stmts.updateChannelRejection.run({ $raison: body.raison || "", $id: id });
+          stmts.updateChannelRejection.run({ $raison: rejectionReason, $id: id });
         });
         rejectTx();
 
@@ -742,8 +754,11 @@ const server = Bun.serve({
       GET: () => json(stmts.getAllTopics.all()),
       POST: async (req) => {
         const body = await readBody(req);
-        if (!body.nom) return json({ error: "nom required" }, 400);
-        const info = stmts.insertTopic.run({ $nom: body.nom, $description: body.description || "" });
+        if (typeof body.nom !== "string" || !body.nom.trim()) return json({ error: "nom required" }, 400);
+        const info = stmts.insertTopic.run({
+          $nom: body.nom.trim().slice(0, 200),
+          $description: typeof body.description === "string" ? body.description.trim().slice(0, 1000) : "",
+        });
         return json({ ok: true, id: info.lastInsertRowid }, 201);
       },
       PATCH: async (req) => {
@@ -767,7 +782,7 @@ const server = Bun.serve({
     "/api/discover": {
       POST: async (req) => {
         const body = await readBody(req);
-        const topicQuery = body.topic?.trim();
+        const topicQuery = typeof body.topic === "string" ? body.topic.trim().slice(0, 300) : "";
         if (!topicQuery) return json({ error: "topic required" }, 400);
 
         const results = await discoverFromTopic(topicQuery);
@@ -814,15 +829,15 @@ const server = Bun.serve({
       },
       POST: async (req) => {
         const body = await readBody(req);
-        if (body.url && typeof body.url === "string") {
-          stmts.insertWatchedVideo.run(body.url);
+        if (typeof body.url === "string" && body.url.length <= 2000) {
+          stmts.insertWatchedVideo.run(body.url.trim());
         }
         return json({ ok: true });
       },
       DELETE: async (req) => {
         const body = await readBody(req);
-        if (body.url && typeof body.url === "string") {
-          stmts.deleteWatchedVideo.run(body.url);
+        if (typeof body.url === "string" && body.url.length <= 2000) {
+          stmts.deleteWatchedVideo.run(body.url.trim());
         }
         return json({ ok: true });
       },
@@ -832,62 +847,147 @@ const server = Bun.serve({
       GET: () => {
         const settings = getAllSettings();
         const channels = stmts.getAllChannels.all();
+        const videos = stmts.getAllVideos.all();
         const topics = stmts.getAllTopics.all();
-        const watched = stmts.getAllWatchedVideos.all().map(r => r.url);
-        // Strip secret fields
+        const channelTopics = stmts.getAllChannelTopics.all();
+        const feedback = stmts.getAllFeedback.all();
+        const watched = stmts.getAllWatchedVideos.all().map((row) => row.url);
+        // Secrets must never leave the local process.
         delete settings.openrouter_key;
-        return json({ version: 1, exportedAt: new Date().toISOString(), settings, channels, topics, watched });
+        return json({
+          version: 2,
+          exportedAt: new Date().toISOString(),
+          settings,
+          channels,
+          videos,
+          topics,
+          channelTopics,
+          feedback,
+          watched,
+        });
       },
     },
 
     "/api/import": {
       POST: async (req) => {
         const body = await readBody(req);
-        if (!body.channels || !body.settings || !body.topics) {
+        if (!body || !Array.isArray(body.channels) || !body.settings || !Array.isArray(body.topics)) {
           return json({ error: "Invalid backup format" }, 400);
         }
-        let imported = { channels: 0, topics: 0, watched: 0, settings: 0 };
-        // Restore settings (skip secrets)
-        for (const [k, v] of Object.entries(body.settings)) {
-          if (SECRET_SETTINGS.has(k) || !SETTINGS_KEYS.has(k)) continue;
-          setSetting(k, String(v));
-          imported.settings++;
+        if (body.channels.length > 100_000 || body.topics.length > 10_000 || (body.videos?.length || 0) > 1_000_000) {
+          return json({ error: "Backup contains too many records" }, 413);
         }
-        // Restore topics with display_order
-        for (const t of body.topics) {
-          if (!t.nom) continue;
-          stmts.insertTopic.run({ $nom: t.nom, $description: t.description || "" });
-          if (t.display_order != null) {
-            const id = db.query("SELECT last_insert_rowid() as id").get().id;
-            stmts.updateTopicOrder.run(t.display_order, id);
-          }
-          imported.topics++;
-        }
-        // Restore channels (only if not already present)
-        const existing = new Set(stmts.getAllChannels.all().map(c => c.channel_id));
-        for (const ch of body.channels) {
-          if (!ch.channel_id || existing.has(ch.channel_id)) continue;
-          stmts.insertChannel.run({
-            $nom: ch.nom || ch.channel_id,
-            $channel_id: ch.channel_id,
-            $subscriber_count: ch.subscriber_count || 0,
-            $last_video_date: ch.last_video_date || null,
-            $thumbnail: ch.thumbnail || "",
-            $description: ch.description || "",
-          });
-          // Restore status
-          if (ch.status && ch.status !== "pending") {
-            const inserted = stmts.getChannelByYoutubeId.get(ch.channel_id);
-            if (inserted) {
-              stmts.updateChannelStatus.run({ $status: ch.status, $id: inserted.id });
+
+        const imported = {
+          channels: 0,
+          videos: 0,
+          topics: 0,
+          channelTopics: 0,
+          feedback: 0,
+          watched: 0,
+          settings: 0,
+        };
+
+        try {
+          db.transaction(() => {
+            // Restore settings (skip secrets and unknown keys).
+            for (const [key, value] of Object.entries(body.settings)) {
+              if (SECRET_SETTINGS.has(key) || !SETTINGS_KEYS.has(key) || typeof value !== "string") continue;
+              setSetting(key, value.trim());
+              imported.settings++;
             }
-          }
-          imported.channels++;
-        }
-        // Restore watched videos
-        for (const url of (body.watched || [])) {
-          stmts.insertWatchedVideo.run(url);
-          imported.watched++;
+
+            // Map exported topic IDs to local IDs so imports work across databases.
+            const localTopics = new Map(
+              stmts.getAllTopics.all().map((topic) => [topic.nom.trim().toLowerCase(), topic.id])
+            );
+            const topicIds = new Map();
+            for (const topic of body.topics) {
+              const name = typeof topic?.nom === "string" ? topic.nom.trim().slice(0, 200) : "";
+              if (!name) continue;
+              const key = name.toLowerCase();
+              let localId = localTopics.get(key);
+              if (!localId) {
+                const result = stmts.insertTopic.run({
+                  $nom: name,
+                  $description: typeof topic.description === "string" ? topic.description.slice(0, 1000) : "",
+                });
+                localId = Number(result.lastInsertRowid);
+                localTopics.set(key, localId);
+                imported.topics++;
+              }
+              if (Number.isSafeInteger(topic.id)) topicIds.set(topic.id, localId);
+              if (Number.isSafeInteger(topic.display_order)) stmts.updateTopicOrder.run(topic.display_order, localId);
+            }
+
+            // Upsert channels first so videos, feedback and topic links have a parent.
+            const channelIds = new Map();
+            for (const channel of body.channels) {
+              if (!isYoutubeChannelId(channel?.channel_id)) continue;
+              const status = ["pending", "validated", "rejected"].includes(channel.status)
+                ? channel.status
+                : "pending";
+              stmts.upsertImportedChannel.run({
+                $nom: String(channel.nom || channel.channel_id).slice(0, 200),
+                $channel_id: channel.channel_id,
+                $status: status,
+                $date_ajout: channel.date_ajout || null,
+                $raison_rejet: typeof channel.raison_rejet === "string" ? channel.raison_rejet.slice(0, 1000) : "",
+                $subscriber_count: Number.isFinite(channel.subscriber_count) ? channel.subscriber_count : 0,
+                $last_video_date: channel.last_video_date || null,
+                $llm_summary: typeof channel.llm_summary === "string" ? channel.llm_summary.slice(0, 5000) : "",
+                $llm_score: Number.isFinite(channel.llm_score) ? Math.min(100, Math.max(0, channel.llm_score)) : null,
+                $thumbnail: typeof channel.thumbnail === "string" ? channel.thumbnail.slice(0, 2000) : "",
+                $description: typeof channel.description === "string" ? channel.description.slice(0, 5000) : "",
+                $last_refresh: channel.last_refresh || null,
+              });
+              channelIds.set(channel.channel_id, channel.channel_id);
+              imported.channels++;
+            }
+
+            for (const video of Array.isArray(body.videos) ? body.videos : []) {
+              if (!channelIds.has(video?.channel_id) || typeof video?.url !== "string" || !video.url) continue;
+              stmts.upsertImportedVideo.run({
+                $channel_id: video.channel_id,
+                $titre: String(video.titre || "Sans titre").slice(0, 500),
+                $description: typeof video.description === "string" ? video.description.slice(0, 10000) : "",
+                $url: video.url.slice(0, 2000),
+                $thumbnail: typeof video.thumbnail === "string" ? video.thumbnail.slice(0, 2000) : "",
+                $date_pub: video.date_pub || null,
+                $vues: Number.isFinite(video.vues) ? Math.max(0, video.vues) : 0,
+                $duration: Number.isFinite(video.duration) ? Math.max(0, video.duration) : 0,
+              });
+              imported.videos++;
+            }
+
+            for (const link of Array.isArray(body.channelTopics) ? body.channelTopics : []) {
+              const topicId = topicIds.get(link?.topic_id) || link?.topic_id;
+              if (!channelIds.has(link?.channel_id) || !Number.isSafeInteger(topicId)) continue;
+              stmts.assignTopic.run(link.channel_id, topicId);
+              imported.channelTopics++;
+            }
+
+            for (const event of Array.isArray(body.feedback) ? body.feedback : []) {
+              if (!channelIds.has(event?.channel_id) || !["validated", "rejected"].includes(event?.decision)) continue;
+              stmts.insertFeedbackExport.run({
+                $channel_id: event.channel_id,
+                $channel_nom: typeof event.channel_nom === "string" ? event.channel_nom.slice(0, 200) : "",
+                $decision: event.decision,
+                $raison: typeof event.raison === "string" ? event.raison.slice(0, 1000) : "",
+                $date_decision: event.date_decision || null,
+              });
+              imported.feedback++;
+            }
+
+            for (const url of Array.isArray(body.watched) ? body.watched : []) {
+              if (typeof url !== "string" || !url || url.length > 2000) continue;
+              stmts.insertWatchedVideo.run(url);
+              imported.watched++;
+            }
+          })();
+        } catch (error) {
+          console.error("[Import] Transaction rolled back:", error.message);
+          return json({ error: "Import failed: " + error.message }, 400);
         }
         return json({ ok: true, imported });
       },
@@ -967,20 +1067,21 @@ const server = Bun.serve({
         const passes = Math.max(1, Math.min(10, Number(body?.passes) || 1));
         const validStatuses = ['pending', 'validated', 'rejected'];
         const statuses = Array.isArray(body?.statuses) && body.statuses.length > 0
-          ? body.statuses.filter(s => validStatuses.includes(s))
+          ? [...new Set(body.statuses.filter(s => validStatuses.includes(s)))]
           : ['validated'];
+        if (statuses.length === 0) {
+          return json({ error: "At least one valid status is required" }, 400);
+        }
 
         isRelatedRunning = true;
         relatedJobId = createJobId();
         relatedAbortController = new AbortController();
         relatedPaused = false;
-        relatedProgress.total = 0;
-        relatedProgress.completed = 0;
-        relatedProgress.found = 0;
-        relatedProgress.current = "";
-        relatedProgress.status = "running";
-        relatedProgress.results = [];
-        relatedProgress.error = "";
+        resetProgressTracker(relatedProgress, {
+          found: 0,
+          results: [],
+          error: "",
+        });
 
         const pauseRef = { get paused() { return relatedPaused; } };
 
@@ -994,11 +1095,14 @@ const server = Bun.serve({
             if (status === "done") relatedProgress.current = current || "";
           },
           (result) => {
+            // Do not accept late callbacks after cancellation. The worker pool
+            // waits for all workers, but this guard also protects future adapters.
+            if (relatedAbortController?.signal.aborted) return;
             relatedProgress.results.push(result);
             relatedProgress.found = relatedProgress.results.length;
             // Auto-ingest videos (free) so newly found channels have videos right
             // away, matching the Discover page workflow.
-            ingestChannel(result.channelId).catch(() => {});
+            ingestChannel(result.channelId).catch((err) => console.error("[Related] ingest failed:", err.message));
           },
           { passes, statuses, signal: relatedAbortController.signal, pauseRef }
         )
@@ -1086,7 +1190,9 @@ const server = Bun.serve({
       // POST /api/channels/resolve-video
       if (method === "POST" && pathname === "/api/channels/resolve-video") {
         const body = await readBody(req);
-        if (!body.url) return json({ error: "url required" }, 400);
+        if (typeof body.url !== "string" || !body.url.trim() || body.url.length > 2000) {
+          return json({ error: "url must be a non-empty string" }, 400);
+        }
         const result = await resolveFromVideoUrl(body.url);
         if (!result) return json({ error: "Could not resolve channel from video URL" }, 404);
         return json(result);
@@ -1238,7 +1344,7 @@ const server = Bun.serve({
 
     } catch (err) {
       console.error(`[Fetch] ${method} ${pathname}:`, err.message);
-      return json({ error: err.message }, 500);
+      return json({ error: err.message || "Internal server error" }, err.status || 500);
     }
 
     // --- Static files ---
@@ -1261,9 +1367,9 @@ const server = Bun.serve({
   // ═══════════════════════════════════════════
   error(error) {
     console.error("[Server]", error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+    return new Response(JSON.stringify({ error: error.message || "Internal server error" }), {
+      status: error.status || 500,
+      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
     });
   },
 });

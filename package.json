@@ -8,6 +8,7 @@
     "start": "bun src/server.js",
     "refresh": "bun src/rss.js",
     "cron": "bun src/cron.js",
-    "backup": "bun scripts/backup-db.js"
+    "backup": "bun scripts/backup-db.js",
+    "test": "bun test"
   }
 }

@@ -60,12 +60,17 @@ function setCachedPage(url, data) {
   pageCache.set(url, { data, time: Date.now() });
 }
 
-async function fetchPageText(url, { retries = 1 } = {}) {
+async function fetchPageText(url, { retries = 1, signal = null } = {}) {
   const cached = getCachedPage(url);
   if (cached !== null) return cached;
 
   for (let attempt = 0; ; attempt++) {
     try {
+      if (signal?.aborted) throw signal.reason || new DOMException("Aborted", "AbortError");
+      const requestController = new AbortController();
+      const abortRequest = () => requestController.abort(signal?.reason);
+      signal?.addEventListener("abort", abortRequest, { once: true });
+      const timeout = setTimeout(() => requestController.abort(), 30000);
       const res = await fetch(url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -73,7 +78,10 @@ async function fetchPageText(url, { retries = 1 } = {}) {
         },
         // Channel pages are heavy (~750KB); 15s was too tight when several
         // deep crawls ran concurrently and YouTube slowed down.
-        signal: AbortSignal.timeout(30000),
+        signal: requestController.signal,
+      }).finally(() => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", abortRequest);
       });
       if (res.ok) {
         const text = await res.text();
@@ -90,6 +98,7 @@ async function fetchPageText(url, { retries = 1 } = {}) {
       }
       return "";
     } catch (err) {
+      if (signal?.aborted) throw err;
       if (attempt >= retries) throw err;
       await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
     }
@@ -819,10 +828,10 @@ export async function resolveFromVideoUrl(videoUrl) {
 
 // --- Related channels scraping (FREE, zero API cost) ---
 
-export async function scrapeRelatedChannels(channelId) {
+export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
   try {
     // Fetch a video from this channel to get its recommendations
-    const html = await fetchPageText(`https://www.youtube.com/channel/${channelId}/videos`);
+    const html = await fetchPageText(`https://www.youtube.com/channel/${channelId}/videos`, { signal });
     if (!html) return [];
 
     // Find the first video ID from this channel
@@ -832,7 +841,7 @@ export async function scrapeRelatedChannels(channelId) {
     const videoId = videoMatch[1];
 
     // Scrape the video page for sidebar recommendations
-    const videoHtml = await fetchPageText(`https://www.youtube.com/watch?v=${videoId}`);
+    const videoHtml = await fetchPageText(`https://www.youtube.com/watch?v=${videoId}`, { signal });
     if (!videoHtml) return [];
 
     const data = extractYtInitialData(videoHtml);
@@ -973,14 +982,18 @@ function isLikelyFrench(html) {
 // --- Related channel discovery from validated channels ---
 
 export async function discoverRelatedFromValidated(onProgress, onResult, { passes = 1, statuses = ['validated'], signal = null, pauseRef = null } = {}) {
+  const normalizedStatuses = [...new Set((Array.isArray(statuses) ? statuses : [])
+    .filter((status) => ['pending', 'validated', 'rejected'].includes(status)))];
+  if (normalizedStatuses.length === 0) return [];
+  const normalizedPasses = Math.max(1, Math.min(10, Number(passes) || 1));
   // Build parameterized IN clause for the list of statuses
-  const placeholders = statuses.map(() => '?').join(', ');
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
   const query = `SELECT channel_id, nom FROM channels WHERE status IN (${placeholders})`;
-  const baseSeeds = db.query(query).all(...statuses);
+  const baseSeeds = db.query(query).all(...normalizedStatuses);
   // Google's recommendations vary between fetches, so scraping each channel
   // `passes` times surfaces more candidates within a single run.
   const validated = [];
-  for (let i = 0; i < passes; i++) validated.push(...baseSeeds);
+  for (let i = 0; i < normalizedPasses; i++) validated.push(...baseSeeds);
   // Fisher-Yates shuffle so exploration order is random on every run
   for (let i = validated.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -1011,14 +1024,14 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
     onProgress?.(completed, validated.length, ch.nom, "running");
 
     try {
-      const related = await scrapeRelatedChannels(ch.channel_id);
+      const related = await scrapeRelatedChannels(ch.channel_id, { signal });
       for (const rc of related) {
         if (seen.has(rc.channelId) || excludedIds.has(rc.channelId)) continue;
         seen.add(rc.channelId);
 
         // Enrich and check if French
         try {
-          const html = await fetchPageText(`https://www.youtube.com/channel/${rc.channelId}`);
+          const html = await fetchPageText(`https://www.youtube.com/channel/${rc.channelId}`, { signal });
           if (html) {
             const data = extractFromHTML(html);
             rc.nom = data.name || rc.nom;
@@ -1027,12 +1040,15 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
             rc.description = data.description || "";
             if (!isLikelyFrench(html)) continue;
           }
-        } catch { continue; }
+        } catch (err) {
+          if (signal?.aborted) throw err;
+          continue;
+        }
 
         rc.source_channel = ch.nom;
-        results.push(rc);
 
         // Insert as pending before notifying the caller so the UI never gets ahead of the database.
+        if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
         stmts.insertChannel.run({
           $nom: rc.nom || rc.channelId,
           $channel_id: rc.channelId,
@@ -1041,15 +1057,17 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
           $thumbnail: rc.thumbnail || "",
           $description: rc.description || "",
         });
+        results.push(rc);
         onResult?.(rc);
       }
     } catch (err) {
+      if (signal?.aborted) throw err;
       console.error(`[Related] Failed for ${ch.nom}: ${err.message}`);
     } finally {
       completed++;
       onProgress?.(completed, validated.length, ch.nom, "done");
     }
-  }, 5, 500);
+  }, 5, 500, { signal });
 
   console.log(`[Related] Found ${results.length} new French channels from ${validated.length} validated channels`);
   return results;

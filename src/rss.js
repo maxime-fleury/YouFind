@@ -173,6 +173,7 @@ export async function ingestChannel(channelId, { maxVideos = 0 } = {}) {
 
   let added = 0;
   let durUpdated = 0;
+  let updated = 0;
   let skippedDurationShorts = 0;
 
   // Mostly local DB work now — durations come from the page scrape itself.
@@ -197,21 +198,21 @@ export async function ingestChannel(channelId, { maxVideos = 0 } = {}) {
         return;
       }
 
+      stmts.insertVideo.run({
+        $channel_id: channelId,
+        $titre: entry.titre || "Sans titre",
+        $description: entry.description || "",
+        $url: entry.url,
+        $thumbnail: entry.thumbnail || "",
+        $date_pub: entry.date_pub || null,
+        $vues: Number.isFinite(entry.vues) ? entry.vues : 0,
+        $duration: dur,
+      });
       if (!existing) {
-        stmts.insertVideo.run({
-          $channel_id: channelId,
-          $titre: entry.titre,
-          $description: entry.description,
-          $url: entry.url,
-          $thumbnail: entry.thumbnail,
-          $date_pub: entry.date_pub,
-          $vues: entry.vues,
-          $duration: dur,
-        });
         added++;
-      } else if (dur > 0 && !existing.duration) {
-        stmts.updateVideoDuration.run({ $duration: dur, $url: entry.url });
-        durUpdated++;
+      } else {
+        updated++;
+        if (dur > 0 && !existing.duration) durUpdated++;
       }
     },
     3
@@ -221,7 +222,7 @@ export async function ingestChannel(channelId, { maxVideos = 0 } = {}) {
     console.log(`[Ingest] Shorts excluded for ${channelId}: ${skippedTextShorts} by text, ${skippedDurationShorts} by duration`);
   }
 
-  return { total: entries.length, added, durUpdated, source };
+  return { total: entries.length, added, updated, durUpdated, source };
 }
 
 // Channels refreshed more recently than this are skipped by the bulk refresh:

@@ -179,21 +179,59 @@ async function callLLM(prompt) {
 }
 
 function parseLLMResponse(text) {
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
+  if (typeof text !== "string" || !text.trim()) return null;
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    const topics = Array.isArray(parsed.topics) ? parsed.topics.map(String).filter(Boolean) : [];
-    return {
-      score: Math.min(100, Math.max(0, Number(parsed.score) || 0)),
-      summary: String(parsed.summary || ""),
-      justification: String(parsed.justification || ""),
-      topics,
-    };
-  } catch {
-    return null;
+  const candidates = [];
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) candidates.push(fenced[1]);
+  candidates.push(text.trim());
+
+  // Extract the first balanced JSON object instead of using a greedy regex,
+  // which could consume several objects or braces from a model explanation.
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (char === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        candidates.push(text.slice(start, i + 1));
+        break;
+      }
+    }
   }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      const score = Number(parsed?.score);
+      if (!Number.isFinite(score) || score < 0 || score > 100) continue;
+      const topics = Array.isArray(parsed.topics)
+        ? parsed.topics.map(String).map((topic) => topic.trim()).filter(Boolean).slice(0, 20)
+        : [];
+      return {
+        score,
+        summary: String(parsed.summary || "").slice(0, 2000),
+        justification: String(parsed.justification || "").slice(0, 2000),
+        topics,
+      };
+    } catch {
+      // Try the next candidate, including the balanced object extracted above.
+    }
+  }
+  return null;
 }
 
 function assignTopicsFromLLM(channelId, topicNames) {
@@ -201,6 +239,8 @@ function assignTopicsFromLLM(channelId, topicNames) {
   const toAssign = topicNames
     .map(name => allTopics.find(t => t.nom.toLowerCase() === name.toLowerCase()))
     .filter(Boolean);
+  // An empty or malformed model topic list must not erase manual assignments.
+  if (topicNames.length === 0 || toAssign.length === 0) return;
   db.query(`DELETE FROM channel_topics WHERE channel_id = ?`).run(channelId);
   for (const t of toAssign) {
     stmts.assignTopic.run(channelId, t.id);

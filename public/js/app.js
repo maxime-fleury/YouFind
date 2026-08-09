@@ -5,6 +5,8 @@ let currentPage = localStorage.getItem("youfind-page") || "videos";
 let rejectChannelId = null;
 let resolvedChannelData = null;
 let previewDebounce = null;
+let previewRequestSeq = 0;
+let previewAbortController = null;
 let currentEditingChannelId = null;
 let currentEditingTopics = new Set();
 let videoOffset = 0;
@@ -60,10 +62,15 @@ async function api(path, opts = {}) {
   const { timeout: timeoutMs, signal: userSignal, ...fetchOpts } = opts;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs || 60000);
+  const onUserAbort = userSignal ? () => controller.abort(userSignal.reason) : null;
+  if (userSignal) {
+    if (userSignal.aborted) controller.abort(userSignal.reason);
+    else userSignal.addEventListener("abort", onUserAbort, { once: true });
+  }
   try {
     const res = await fetch(`/api${path}`, {
       headers: { "Content-Type": "application/json" },
-      signal: userSignal || controller.signal,
+      signal: controller.signal,
       ...fetchOpts,
     });
     if (!res.ok) {
@@ -76,9 +83,10 @@ async function api(path, opts = {}) {
       }
       throw new Error(err || `HTTP ${res.status}`);
     }
-    return res.json();
+    return res.status === 204 ? null : res.json();
   } finally {
     clearTimeout(timer);
+    if (userSignal && onUserAbort) userSignal.removeEventListener("abort", onUserAbort);
   }
 }
 
@@ -1347,6 +1355,9 @@ async function confirmReject() {
 
 async function previewChannel() {
   clearTimeout(previewDebounce);
+  previewAbortController?.abort();
+  previewAbortController = null;
+  const requestSeq = ++previewRequestSeq;
   resolvedChannelData = null;
   const input = document.getElementById("add-ch-input").value.trim();
   const preview = document.getElementById("add-ch-preview");
@@ -1364,11 +1375,15 @@ async function previewChannel() {
   btn.disabled = true;
 
   previewDebounce = setTimeout(async () => {
+    const controller = new AbortController();
+    previewAbortController = controller;
     try {
       const data = await api("/channels/resolve", {
         method: "POST",
         body: JSON.stringify({ input }),
+        signal: controller.signal,
       });
+      if (requestSeq !== previewRequestSeq) return;
 
       if (data.error) {
         preview.innerHTML = `<div class="text-muted" style="font-size:0.85rem">Aucun resultat</div>`;
@@ -1377,7 +1392,8 @@ async function previewChannel() {
       }
 
       resolvedChannelData = data;
-      const exists = await api("/channels?status=");
+      const exists = await api("/channels?status=", { signal: controller.signal });
+      if (requestSeq !== previewRequestSeq) return;
       const alreadyExists = exists.some((ch) => ch.channel_id === data.channelId);
 
       let html = `
@@ -1412,8 +1428,11 @@ async function previewChannel() {
       preview.innerHTML = html;
       btn.disabled = alreadyExists;
     } catch (err) {
-      preview.innerHTML = `<div class="text-muted" style="font-size:0.85rem">Erreur: ${err.message}</div>`;
+      if (requestSeq !== previewRequestSeq || err.name === "AbortError") return;
+      preview.innerHTML = `<div class="text-muted" style="font-size:0.85rem">Erreur: ${escapeHtml(err.message)}</div>`;
       resolvedChannelData = null;
+    } finally {
+      if (requestSeq === previewRequestSeq) previewAbortController = null;
     }
   }, 600);
 }
@@ -2453,24 +2472,20 @@ function updateRelatedProgress(data) {
 
 // Run the related exploration once, streaming results into the container.
 async function runRelatedPass({ status, results, passes, statuses }) {
-  let cursor = 0;
   const multi = (passes || 1) > 1;
 
   const data = await pollJob({
     startUrl: "/discover/related",
     startBody: { passes: passes || 1, statuses },
-    statusUrl: `/discover/related/status?job={jobId}&since=${cursor}`,
+    statusUrl: ({ jobId, state }) =>
+      `/discover/related/status?job=${encodeURIComponent(jobId)}&since=${state.cursor}`,
     interval: 1200,
     onProgress: (data) => {
       updateRelatedProgress(data);
       if (Array.isArray(data.results) && data.results.length > 0) {
         results.insertAdjacentHTML("beforeend", data.results.map(renderRelatedChannel).join(""));
-        // The server returns results slice + `next` cursor; update the statusUrl
-        // dynamically. Since pollJob builds the URL once, we handle the cursor
-        // by appending results on each poll via the updated `next` field.
-        cursor = data.next;
-        // Update the polling URL with the new cursor — this is a known limitation
-        // of the generic poller, but the `since` parameter is progressive so it works.
+        // pollJob advances the cursor from the server's `next` value before
+        // constructing the following status URL.
         status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${multi ? `Exploration x${passes} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
       }
       if (typeof data.paused === 'boolean') {
