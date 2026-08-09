@@ -1820,22 +1820,27 @@ function safeChannelId(value) {
 
 let _seenCache = null;
 let _seenLoaded = false;
+let _seenLoadPromise = null;
 
 async function loadSeenVideos() {
   if (_seenLoaded) return;
-  try {
-    const urls = await api("/watched");
-    _seenCache = new Set(urls);
-    _seenLoaded = true;
-  } catch {
-    // Fallback to localStorage
+  if (_seenLoadPromise) return _seenLoadPromise;
+  _seenLoadPromise = (async () => {
     try {
-      _seenCache = new Set(JSON.parse(localStorage.getItem("youfind-seen") || "[]"));
+      const urls = await api("/watched");
+      _seenCache = new Set(urls);
     } catch {
-      _seenCache = new Set();
+      // Fallback to localStorage
+      try {
+        _seenCache = new Set(JSON.parse(localStorage.getItem("youfind-seen") || "[]"));
+      } catch {
+        _seenCache = new Set();
+      }
     }
     _seenLoaded = true;
-  }
+    _seenLoadPromise = null;
+  })();
+  return _seenLoadPromise;
 }
 
 function getSeenVideos() {
@@ -2882,11 +2887,15 @@ async function loadChannelPreview(channelId, videos = null) {
 })();
 
 // Fallback if stored page no longer exists
-if (!document.getElementById(`page-${currentPage}`)) {
-  currentPage = "videos";
-  localStorage.setItem("youfind-page", "videos");
-}
-navigateTo(currentPage);
-loadStats();
-loadLLMHealth();
-populateTopicFilter();
+(async () => {
+  if (!document.getElementById(`page-${currentPage}`)) {
+    currentPage = "videos";
+    localStorage.setItem("youfind-page", "videos");
+  }
+  // Wait for seen videos to load before rendering (avoids flash of un-watched state)
+  await loadSeenVideos();
+  navigateTo(currentPage);
+  loadStats();
+  loadLLMHealth();
+  populateTopicFilter();
+})();
