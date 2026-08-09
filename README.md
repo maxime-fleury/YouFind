@@ -25,18 +25,19 @@ YouTube veut te garder le plus longtemps possible. YouFind fait l'inverse : il t
 - Statuts : **en attente**, **validée**, **rejetée**
 - **Tri** par date d'ajout, nom, score LLM, abonnés
 - **Filtres** : statut, scorées / non scorées, recherche full-text
-- **Vue compacte** en tableau avec toggle liste/grille
+- **Vue compacte** en tableau avec toggle liste/grille et **colonnes triables**
 - **Badge "New"** sur les chaînes ajoutées il y a moins de 24h
 - **Compteur de vidéos** par chaîne
 - Badge **"RSS il y a Xh"** indiquant le dernier rafraîchissement
-- Rafraîchissement des stats (abonnés, miniature, nom) — **parallèle (3 workers)**
+- **Triage rapide** : ouvre une chaîne, valide/refuse, la suivante est **préchargée** en arrière-plan
+- Rafraîchissement des stats (abonnés, miniature, nom) — **parallèle (3 workers) avec barre de progression**
 
 ### Feed vidéo
 - Grille infinie avec les vidéos des chaînes validées
 - Tri par **date**, **vues**, **engagement** (vues/abonnés), **score LLM** ou **pertinence** (recherche)
 - Filtrage par **thème**
 - Filtrage automatique des **Shorts** (vidéos < 60s)
-- Marquage des vidéos déjà vues (localStorage)
+- Marquage des vidéos déjà vues (base de données SQLite)
 - Lecteur YouTube intégré dans une modale
 - Prefetch de la page suivante en arrière-plan
 
@@ -62,6 +63,10 @@ YouTube veut te garder le plus longtemps possible. YouFind fait l'inverse : il t
 - Assigné des chaînes aux thèmes
 - Filtre le feed par thème
 
+### Sauvegarde et export
+- **Export/Import** complet : settings + topics (ordre) + chaînes (statut) + vidéos vues en un fichier JSON
+- Boutons dans l'onglet **Réglages**
+
 ### Automatisation (cron)
 - **RSS** : les vidéos des chaînes validées sont récupérées toutes les 24h
 - **Découverte** : une exploration thématique est lancée tous les 3 jours
@@ -74,6 +79,7 @@ YouTube veut te garder le plus longtemps possible. YouFind fait l'inverse : il t
 - Top chaînes par score LLM
 - Statistiques globales
 - Compte à rebours jusqu'au prochain refresh RSS
+- Barre de progression pour le refresh des stats
 
 ---
 
@@ -160,6 +166,7 @@ youfind/
 - **feedback_log** : historique des validations/rejets (pour le prompt LLM)
 - **settings** : configuration (clés/valeurs)
 - **channels_fts** : index full-text (FTS5 trigram) pour la recherche de chaînes
+- **watched_videos** : historique des vidéos regardées (URL, date)
 
 ---
 
@@ -207,6 +214,10 @@ Toutes les routes sont préfixées par `/api/`.
 | GET | `/api/settings` | Configuration publique |
 | POST | `/api/settings` | Mettre à jour la configuration |
 | GET | `/api/feedback` | Historique des validations/rejets |
+| GET | `/api/watched` | Liste des URLs de vidéos regardées |
+| POST | `/api/watched` | Marquer une vidéo comme vue |
+| GET | `/api/export` | Exporter la config complète (JSON) |
+| POST | `/api/import` | Importer une config complète |
 
 ---
 
