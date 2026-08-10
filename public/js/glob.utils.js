@@ -101,7 +101,7 @@ function downloadTextFile(content, filename, mime) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setTimeout(() => URL.revokeObjectURL(url), FRONTEND_DELAYS.DOWNLOAD_REVOKE_MS);
 }
 
 // Prevent CSV formula injection (Excel interprets =, +, -, @ as formulas).
@@ -137,6 +137,6 @@ function showToast(message, type = "info") {
   setTimeout(() => {
     toast.style.opacity = "0";
     toast.style.transition = "opacity 0.3s";
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
+    setTimeout(() => toast.remove(), FRONTEND_DELAYS.TOAST_FADE_MS);
+  }, FRONTEND_DELAYS.TOAST_DURATION_MS);
 }

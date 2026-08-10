@@ -1,42 +1,8 @@
 import { db, stmts } from "./db.js";
 import { runWithLimit } from "./utils.js";
+import { extractChannelIdsFromText, isShortByText, parseChannelInput } from "./youtube-parsers.js";
 
-export function parseChannelInput(input) {
-  const trimmed = input.trim();
-
-  const idMatch = trimmed.match(/\/channel\/(UC[\w-]+)/);
-  if (idMatch) return { type: "id", channelId: idMatch[1] };
-
-  const handleMatch = trimmed.match(/youtube\.com\/@([\w.-]+)/);
-  if (handleMatch) return { type: "handle", handle: handleMatch[1] };
-
-  const userMatch = trimmed.match(/youtube\.com\/user\/([\w.-]+)/);
-  if (userMatch) return { type: "handle", handle: userMatch[1] };
-
-  const customMatch = trimmed.match(/youtube\.com\/c\/([\w.-]+)/);
-  if (customMatch) return { type: "handle", handle: customMatch[1] };
-
-  if (/^UC[\w-]{22}$/.test(trimmed)) return { type: "id", channelId: trimmed };
-
-  // Detect video URL patterns
-  const videoPatterns = [
-    /[?&]v=([\w-]{11})/,
-    /youtu\.be\/([\w-]{11})/,
-    /youtube\.com\/embed\/([\w-]{11})/,
-    /youtube\.com\/shorts\/([\w-]{11})/,
-    /youtube\.com\/v\/([\w-]{11})/,
-  ];
-  for (const p of videoPatterns) {
-    const m = trimmed.match(p);
-    if (m) return { type: "video", videoUrl: trimmed };
-  }
-  const lastSeg = trimmed.split("/").pop()?.split("?")[0];
-  if (lastSeg?.length === 11 && /^[\w-]{11}$/.test(lastSeg)) {
-    return { type: "video", videoUrl: trimmed };
-  }
-
-  return { type: "query", query: trimmed };
-}
+export { extractChannelIdsFromText, isShortByText, parseChannelInput };
 
 const pageCache = new Map();
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -290,11 +256,6 @@ function parseRelativeTime(text) {
   if (m) return apply(parseInt(m[1]), "year");
 
   return null;
-}
-
-export function isShortByText(title = "", description = "") {
-  const text = `${title} ${description}`.toLowerCase();
-  return /#shorts?\b|#short\b|shorts? video|youtube shorts?/.test(text);
 }
 
 function parseGridVideo(item) {
@@ -881,44 +842,6 @@ export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
     console.error(`[Scrape] Failed to get related channels for ${channelId}: ${err.message}`);
     return [];
   }
-}
-
-export function extractChannelIdsFromText(text) {
-  const channelIds = new Set();
-  const handles = [];
-
-  // Match /channel/UC... patterns
-  const channelPattern = /youtube\.com\/channel\/(UC[\w-]{22})/g;
-  let match;
-  while ((match = channelPattern.exec(text)) !== null) {
-    channelIds.add(match[1]);
-  }
-
-  // Match /@handle patterns
-  const handlePattern = /youtube\.com\/@([\w.-]+)/g;
-  while ((match = handlePattern.exec(text)) !== null) {
-    handles.push(match[1]);
-  }
-
-  // Match /user/name patterns
-  const userPattern = /youtube\.com\/user\/([\w.-]+)/g;
-  while ((match = userPattern.exec(text)) !== null) {
-    handles.push(match[1]);
-  }
-
-  // Match /c/name patterns
-  const customPattern = /youtube\.com\/c\/([\w.-]+)/g;
-  while ((match = customPattern.exec(text)) !== null) {
-    handles.push(match[1]);
-  }
-
-  // Match bare UC... IDs
-  const bareIdPattern = /\b(UC[\w-]{22})\b/g;
-  while ((match = bareIdPattern.exec(text)) !== null) {
-    channelIds.add(match[1]);
-  }
-
-  return { channelIds: [...channelIds], handles };
 }
 
 // --- French language detection ---

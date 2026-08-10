@@ -67,7 +67,7 @@ function hideVideoSkeletons() {
 
 function debounceVideoSearch() {
   clearTimeout(videoSearchDebounce);
-  videoSearchDebounce = setTimeout(() => loadVideos(true), 300);
+  videoSearchDebounce = setTimeout(() => loadVideos(true), FRONTEND_DELAYS.VIDEO_SEARCH_DEBOUNCE_MS);
 }
 
 async function loadVideos(reset = true) {
@@ -109,7 +109,7 @@ async function loadVideos(reset = true) {
   document.getElementById("videos-empty")?.classList.add("d-none");
   document.getElementById("video-end-message")?.remove();
 
-  let url = `/videos?limit=${VIDEO_PAGE_SIZE}&offset=${videoOffset}&sort=${sort}`;
+  let url = `/videos?limit=${FRONTEND_LIMITS.VIDEO_PAGE_SIZE}&offset=${videoOffset}&sort=${sort}`;
   if (topicFilter) url += `&topic=${topicFilter}`;
   if (search) url += `&q=${encodeURIComponent(search)}`;
 
@@ -139,7 +139,7 @@ async function loadVideos(reset = true) {
 
     videoOffset += videos.length;
 
-    if (videos.length < VIDEO_PAGE_SIZE) {
+    if (videos.length < FRONTEND_LIMITS.VIDEO_PAGE_SIZE) {
       hasMoreVideos = false;
       grid.insertAdjacentHTML("beforeend", '<div id="video-end-message" class="col-12 text-center py-4 text-muted"><small>Fin des vidéos</small></div>');
     } else {
@@ -159,7 +159,7 @@ function prefetchNextPage(topicFilter, search) {
   if (prefetchedVideos || prefetchPromise) return; // already cached or in flight
   const nextOffset = videoOffset;
   const sort = document.getElementById("video-sort")?.value || "newest";
-  let url = `/videos?limit=${VIDEO_PAGE_SIZE}&offset=${nextOffset}&sort=${sort}`;
+  let url = `/videos?limit=${FRONTEND_LIMITS.VIDEO_PAGE_SIZE}&offset=${nextOffset}&sort=${sort}`;
   if (topicFilter) url += `&topic=${topicFilter}`;
   if (search) url += `&q=${encodeURIComponent(search)}`;
   prefetchAbortController = new AbortController();

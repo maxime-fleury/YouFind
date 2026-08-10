@@ -3,7 +3,7 @@
 async function api(path, opts = {}) {
   const { timeout: timeoutMs, signal: userSignal, ...fetchOpts } = opts;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs || 60000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs || FRONTEND_DELAYS.API_TIMEOUT_MS);
   const onUserAbort = userSignal ? () => controller.abort(userSignal.reason) : null;
 
   if (userSignal) {

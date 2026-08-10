@@ -32,9 +32,9 @@ async function pollJob({
   startBody,
   statusUrl,
   onProgress,
-  interval = 1000,
-  deadline = 2 * 60 * 60 * 1000,
-  maxFailures = 10,
+  interval = FRONTEND_DELAYS.POLL_INTERVAL_MS,
+  deadline = FRONTEND_DELAYS.POLL_DEADLINE_MS,
+  maxFailures = FRONTEND_LIMITS.POLL_MAX_FAILURES,
   signal,
 }) {
   if (signal?.aborted) throw signal.reason || new Error("Operation cancelled");
@@ -48,7 +48,7 @@ async function pollJob({
   } catch (err) {
     if (signal?.aborted) throw signal.reason || err;
     if (!/in progress|409/i.test(err.message)) throw err;
-    await waitFor(2000, signal);
+    await waitFor(FRONTEND_DELAYS.POLL_RETRY_MS, signal);
     started = await api(startUrl, startOpts);
   }
 
@@ -84,8 +84,8 @@ async function pollJob({
     }
     onProgress?.(data);
 
-    if (data.status === "done" || data.status === "cancelled") return data;
-    if (data.status === "error" || data.status === "interrupted") {
+    if (data.status === JOB_STATUSES.DONE || data.status === JOB_STATUSES.CANCELLED) return data;
+    if (data.status === JOB_STATUSES.ERROR || data.status === JOB_STATUSES.INTERRUPTED) {
       throw new Error(data.error || "Le job a été interrompu par le serveur");
     }
   }

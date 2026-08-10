@@ -70,7 +70,7 @@ function filterChannels() {
   channelSearchDebounce = setTimeout(() => {
     const q = document.getElementById("channel-search").value.trim();
     searchChannels(q);
-  }, 150);
+  }, FRONTEND_DELAYS.CHANNEL_SEARCH_DEBOUNCE_MS);
 }
 
 async function searchChannels(q) {
@@ -96,8 +96,6 @@ async function searchChannels(q) {
     renderChannels(q, _allChannels);
   }
 }
-
-const CHANNEL_RENDER_CAP = 200;
 
 function renderChannels(searchQuery, channels = _allChannels) {
   const list = document.getElementById("channels-list");
@@ -136,7 +134,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
     return;
   }
 
-  const shown = channels.slice(0, CHANNEL_RENDER_CAP);
+  const shown = channels.slice(0, FRONTEND_LIMITS.CHANNEL_RENDER_CAP);
   const hiddenCount = channels.length - shown.length;
 
   list.innerHTML = shown
@@ -162,13 +160,13 @@ function renderChannels(searchQuery, channels = _allChannels) {
           ${ch.raison_rejet ? `<div class="mt-1" style="font-size:0.78rem;color:var(--accent-red)"><i class="bi bi-x-circle"></i> ${escapeHtml(ch.raison_rejet)}</div>` : ""}
           <div class="d-flex align-items-center gap-2 mt-2" style="flex-wrap:wrap">
             <div id="ch-topics-${ch.id}"></div>
-            ${ch.status === "pending" ? `<button class="btn btn-sm-glass btn-sm ms-auto" onclick="scoreSingle('${safeChannelId(ch.channel_id)}', ${ch.id})" title="Score LLM"><i class="bi bi-stars"></i> Score</button>` : ""}
+            ${ch.status === CHANNEL_STATUSES.PENDING ? `<button class="btn btn-sm-glass btn-sm ms-auto" onclick="scoreSingle('${safeChannelId(ch.channel_id)}', ${ch.id})" title="Score LLM"><i class="bi bi-stars"></i> Score</button>` : ""}
           </div>
-          ${ch.status === "pending" ? `<div class="mt-2" id="ch-preview-${ch.id}"><div class="spinner-glass"></div></div>` : ""}
+          ${ch.status === CHANNEL_STATUSES.PENDING ? `<div class="mt-2" id="ch-preview-${ch.id}"><div class="spinner-glass"></div></div>` : ""}
         </div>
         <div class="ch-actions">
           ${
-            ch.status === "pending"
+            ch.status === CHANNEL_STATUSES.PENDING
               ? `<div class="ch-actions-row">
               <button class="btn btn-success-glass btn-sm" onclick="validateChannel(${ch.id})" title="Valider">
                 <i class="bi bi-check-lg"></i> Valider
@@ -184,14 +182,14 @@ function renderChannels(searchQuery, channels = _allChannels) {
               <span class="quick-reject-pill" onclick="quickRejectChannel(${ch.id}, 'Pas active')">Inactive</span>
             </div>
             <div class="ch-actions-divider"></div>`
-              : ch.status === "validated"
+              : ch.status === CHANNEL_STATUSES.VALIDATED
                 ? `<div class="ch-actions-row">
               <button class="btn btn-danger-glass btn-sm" onclick="openReject(${ch.id}, '${escapeInlineJs(ch.nom)}')" title="Rejeter">
                 <i class="bi bi-x-lg"></i> Rejeter
               </button>
             </div>
             <div class="ch-actions-divider"></div>`
-                : ch.status === "rejected"
+                : ch.status === CHANNEL_STATUSES.REJECTED
                   ? `<div class="ch-actions-row">
               <button class="btn btn-success-glass btn-sm" onclick="validateChannel(${ch.id})" title="Valider cette chaîne rejetée">
                 <i class="bi bi-check-lg"></i> Valider
@@ -223,7 +221,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
 
   channels.forEach((ch) => {
     renderChannelTopicBadges(ch.id, ch.topics || [], ch.nom);
-    if (ch.status === "pending") renderChannelPreview(ch.id, ch.preview_videos || []);
+    if (ch.status === CHANNEL_STATUSES.PENDING) renderChannelPreview(ch.id, ch.preview_videos || []);
   });
 }
 
@@ -264,7 +262,7 @@ function renderCompactTable(channels) {
           </tr>
         </thead>
         <tbody>
-          ${channels.slice(0, CHANNEL_RENDER_CAP).map(ch => `
+          ${channels.slice(0, FRONTEND_LIMITS.CHANNEL_RENDER_CAP).map(ch => `
             <tr class="${isNewChannel(ch) ? 'ch-row-new' : ''}" style="cursor:pointer" onclick="openChannelDetail(${ch.id})">
               <td>
                 <div class="d-flex align-items-center gap-2">
@@ -279,14 +277,14 @@ function renderCompactTable(channels) {
               <td>${ch.video_count ?? '—'}</td>
               <td class="text-xs text-muted">${formatDate(ch.date_ajout)}</td>
               <td>
-                ${ch.status === 'pending' ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannel(${ch.id})" style="padding:2px 8px;font-size:0.68rem"><i class="bi bi-check-lg"></i></button>` : ''}
+                ${ch.status === CHANNEL_STATUSES.PENDING ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannel(${ch.id})" style="padding:2px 8px;font-size:0.68rem"><i class="bi bi-check-lg"></i></button>` : ''}
                 <button class="btn btn-sm-glass btn-sm" onclick="event.stopPropagation();window.open('https://youtube.com/channel/${safeChannelId(ch.channel_id)}/videos','_blank')" style="padding:2px 6px;font-size:0.68rem"><i class="bi bi-youtube"></i></button>
               </td>
             </tr>
           `).join("")}
         </tbody>
       </table>
-      ${channels.length > CHANNEL_RENDER_CAP ? `<div class="text-center text-muted py-2 text-xs">${channels.length - CHANNEL_RENDER_CAP} autre${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} chaîne${channels.length - CHANNEL_RENDER_CAP > 1 ? 's' : ''} — affines ta recherche</div>` : ''}
+      ${channels.length > FRONTEND_LIMITS.CHANNEL_RENDER_CAP ? `<div class="text-center text-muted py-2 text-xs">${channels.length - FRONTEND_LIMITS.CHANNEL_RENDER_CAP} autre${channels.length - FRONTEND_LIMITS.CHANNEL_RENDER_CAP > 1 ? 's' : ''} chaîne${channels.length - FRONTEND_LIMITS.CHANNEL_RENDER_CAP > 1 ? 's' : ''} — affines ta recherche</div>` : ''}
     </div>`;
 }
 
@@ -494,13 +492,13 @@ function renderDiscoveryResults(channels, currentChannels) {
     const channelId = safeChannelId(ch.channelId);
     const existing = byChannelId.get(ch.channelId);
     const state = existing?.status || "pending";
-    const stateClass = state === "validated" ? "validated" : state === "rejected" ? "rejected" : "pending";
-    const action = state === "pending"
+    const stateClass = state === CHANNEL_STATUSES.VALIDATED ? "validated" : state === CHANNEL_STATUSES.REJECTED ? "rejected" : "pending";
+    const action = state === CHANNEL_STATUSES.PENDING
       ? `<button class="btn btn-success-glass btn-sm" onclick="event.stopPropagation();validateChannelByYtId('${channelId}')" title="Valider cette chaîne"><i class="bi bi-check-lg"></i><span>Valider</span></button><button class="btn btn-danger-glass btn-sm" onclick="event.stopPropagation();rejectChannelByYtId('${channelId}', '${escapeInlineJs(ch.nom)}')" title="Rejeter cette chaîne"><i class="bi bi-x-lg"></i><span>Rejeter</span></button>`
-      : `<span class="discover-processed"><i class="bi bi-${state === "validated" ? "check-circle" : "x-circle"}"></i> ${labels[state]}</span>`;
+      : `<span class="discover-processed"><i class="bi bi-${state === CHANNEL_STATUSES.VALIDATED ? "check-circle" : "x-circle"}"></i> ${labels[state]}</span>`;
     return `<article class="discover-result discover-result-modern" id="dr-${channelId}">
       <div class="dr-avatar">${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="Miniature de ${escapeHtml(ch.nom)}" loading="lazy">` : '<i class="bi bi-person"></i>'}</div>
-      <div class="dr-info"><div class="dr-title-row"><a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener noreferrer" class="dr-name">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right"></i></a><span class="status-badge ${stateClass}">${labels[state]}</span></div><div class="dr-stats"><i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnés <span class="dr-dot">·</span><span>${state === "pending" ? "À trier" : "Déjà traitée"}</span></div></div>
+      <div class="dr-info"><div class="dr-title-row"><a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener noreferrer" class="dr-name">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right"></i></a><span class="status-badge ${stateClass}">${labels[state]}</span></div><div class="dr-stats"><i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnés <span class="dr-dot">·</span><span>${state === CHANNEL_STATUSES.PENDING ? "À trier" : "Déjà traitée"}</span></div></div>
       <div class="dr-actions">${action}</div>
     </article>`;
   }).join("");
@@ -705,7 +703,7 @@ async function quickRejectChannel(id, raison) {
       body: JSON.stringify({ raison }),
     });
     showToast("Chaine rejetee: " + raison, "info");
-    document.getElementById("channel-filter").value = "pending";
+    document.getElementById("channel-filter").value = CHANNEL_STATUSES.PENDING;
     loadChannels();
     loadStats();
   } catch (err) {
@@ -778,7 +776,7 @@ async function confirmReject() {
 
     rejectModal.hide();
     showToast("Chaine rejetee", "info");
-    document.getElementById("channel-filter").value = "pending";
+    document.getElementById("channel-filter").value = CHANNEL_STATUSES.PENDING;
 
     loadChannels();
     loadStats();
@@ -868,7 +866,7 @@ async function previewChannel() {
     } finally {
       if (requestSeq === previewRequestSeq) previewAbortController = null;
     }
-  }, 600);
+  }, FRONTEND_DELAYS.PREVIEW_DEBOUNCE_MS);
 }
 
 function addChannel() {
@@ -908,23 +906,23 @@ async function refreshAllChannelStats() {
   try {
     await api("/channels/refresh-stats", { method: "POST" });
     // Poll progress
-    const deadline = Date.now() + 30 * 60 * 1000;
+    const deadline = Date.now() + FRONTEND_DELAYS.REFRESH_POLL_DEADLINE_MS;
     let failures = 0;
     while (Date.now() < deadline) {
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, FRONTEND_DELAYS.REFRESH_POLL_INTERVAL_MS));
       try {
         const prog = await api("/refresh-stats/status");
         failures = 0;
-        if (prog.status === "done") {
+        if (prog.status === JOB_STATUSES.DONE) {
           btn.innerHTML = `<i class="bi bi-check-circle"></i> ${prog.completed}/${prog.total}`;
           showToast("Stats mises a jour !", "success");
           break;
         }
-        if (prog.status === "error") throw new Error("Refresh stats failed");
+        if (prog.status === JOB_STATUSES.ERROR) throw new Error("Refresh stats failed");
         btn.innerHTML = `<span class="spinner-glass"></span> ${prog.completed || 0}/${prog.total || "?"}`;
       } catch {
         failures++;
-        if (failures >= 5) throw new Error("Connexion perdue");
+        if (failures >= FRONTEND_LIMITS.REFRESH_STATS_MAX_FAILURES) throw new Error("Connexion perdue");
       }
     }
     loadChannels();
@@ -981,9 +979,9 @@ async function runRefreshJob(mode) {
   // Poll status until done
   let done = false;
   let status = null;
-  const pollDeadline = Date.now() + 30 * 60 * 1000;
+  const pollDeadline = Date.now() + FRONTEND_DELAYS.REFRESH_POLL_DEADLINE_MS;
   while (!done && Date.now() < pollDeadline) {
-    await new Promise((r) => setTimeout(r, 1500));
+    await new Promise((r) => setTimeout(r, FRONTEND_DELAYS.REFRESH_POLL_INTERVAL_MS));
     try {
       status = await api(statusPath);
     } catch { continue; }
@@ -996,7 +994,7 @@ async function runRefreshJob(mode) {
       : "Rafraîchissement...";
     detail.textContent = status.current || "";
 
-    if (status.status === "done" || status.status === "error") {
+    if (status.status === JOB_STATUSES.DONE || status.status === JOB_STATUSES.ERROR) {
       done = true;
     }
   }
@@ -1022,7 +1020,7 @@ async function runRefreshJob(mode) {
     banner.classList.add("d-none");
     bar.classList.add("progress-bar-striped", "progress-bar-animated");
     bar.style.width = "0%";
-  }, 3000);
+  }, FRONTEND_DELAYS.REFRESH_BANNER_HIDE_MS);
 
   loadVideos(true);
   loadStats();
@@ -1033,9 +1031,9 @@ async function runRefreshJob(mode) {
 }
 
 async function watchRefreshInBackground({ statusPath, mode, btn, icon, banner, bar, count, detail }) {
-  const watcherDeadline = Date.now() + 2 * 60 * 60 * 1000;
+  const watcherDeadline = Date.now() + FRONTEND_DELAYS.REFRESH_BACKGROUND_DEADLINE_MS;
   while (Date.now() < watcherDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, FRONTEND_DELAYS.REFRESH_BACKGROUND_INTERVAL_MS));
     let status;
     try {
       status = await api(statusPath);
@@ -1047,7 +1045,7 @@ async function watchRefreshInBackground({ statusPath, mode, btn, icon, banner, b
     count.textContent = `${status.completed} / ${status.total}`;
     bar.style.width = `${pct}%`;
     detail.textContent = status.current || "Refresh toujours en cours";
-    if (status.status !== "done" && status.status !== "error") continue;
+    if (status.status !== JOB_STATUSES.DONE && status.status !== JOB_STATUSES.ERROR) continue;
 
     bar.classList.remove("progress-bar-striped", "progress-bar-animated");
     bar.style.width = "100%";
@@ -1057,7 +1055,7 @@ async function watchRefreshInBackground({ statusPath, mode, btn, icon, banner, b
       banner.classList.add("d-none");
       bar.classList.add("progress-bar-striped", "progress-bar-animated");
       bar.style.width = "0%";
-    }, 3000);
+    }, FRONTEND_DELAYS.REFRESH_BANNER_HIDE_MS);
     loadVideos(true);
     loadStats();
     if (mode === "pending-videos") loadChannels();
@@ -1072,7 +1070,7 @@ async function watchRefreshInBackground({ statusPath, mode, btn, icon, banner, b
     banner.classList.add("d-none");
     bar.classList.add("progress-bar-striped", "progress-bar-animated");
     bar.style.width = "0%";
-  }, 5000);
+  }, FRONTEND_DELAYS.REFRESH_TIMEOUT_HIDE_MS);
   icon?.classList.remove("spinning");
   btn?.removeAttribute("disabled");
   btn?.removeAttribute("aria-busy");
@@ -1820,7 +1818,7 @@ async function openChannelDetail(id, opts = {}) {
     currentDetailChannel = { id, channel_id: ch.channel_id, nom: ch.nom, status: ch.status };
 
     // Triage buttons (valider/refuser + suivant) only make sense for pending channels.
-    const isPending = ch.status === "pending";
+    const isPending = ch.status === CHANNEL_STATUSES.PENDING;
     document.getElementById("btn-detail-accept-next")?.classList.toggle("d-none", !isPending);
     document.getElementById("btn-detail-reject-next")?.classList.toggle("d-none", !isPending);
 
@@ -2093,8 +2091,8 @@ async function loadChannelPreview(channelId, videos = null) {
 // Fallback if stored page no longer exists
 (async () => {
   if (!document.getElementById(`page-${currentPage}`)) {
-    currentPage = "videos";
-    localStorage.setItem("youfind-page", "videos");
+    currentPage = DEFAULT_PAGE;
+    localStorage.setItem(PAGE_STORAGE_KEY, DEFAULT_PAGE);
   }
   // Wait for seen videos to load before rendering (avoids flash of un-watched state)
   await loadSeenVideos();

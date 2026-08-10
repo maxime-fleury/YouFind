@@ -86,7 +86,7 @@ function updateRssCountdown() {
 
 function scheduleRssCountdown() {
   if (rssCountdownTimer) return;
-  rssCountdownTimer = setInterval(updateRssCountdown, 15000);
+  rssCountdownTimer = setInterval(updateRssCountdown, FRONTEND_DELAYS.RSS_COUNTDOWN_INTERVAL_MS);
 }
 
 async function loadStats() {

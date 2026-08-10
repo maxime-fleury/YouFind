@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════
 //  STATE — Global mutable state
 // ═══════════════════════════════════════════
-let currentPage = localStorage.getItem("youfind-page") || "videos";
+let currentPage = localStorage.getItem(PAGE_STORAGE_KEY) || DEFAULT_PAGE;
 let rejectChannelId = null;
 let resolvedChannelData = null;
 let previewDebounce = null;
@@ -21,7 +21,6 @@ let prefetchPromise = null;
 let prefetchAbortController = null;
 let currentVideoFilter = "";
 let videoSearchDebounce = null;
-const VIDEO_PAGE_SIZE = 60;
 const rejectModal = new bootstrap.Modal(document.getElementById("rejectModal"));
 const addChannelModal = new bootstrap.Modal(document.getElementById("addChannelModal"));
 const channelTopicsModal = new bootstrap.Modal(document.getElementById("channelTopicsModal"));
@@ -46,17 +45,18 @@ document.querySelectorAll("[data-page]").forEach((btn) => {
 //  NAVIGATION & API
 // ═══════════════════════════════════════════
 function navigateTo(page) {
+  if (!PAGE_NAMES.includes(page)) return;
   currentPage = page;
-  localStorage.setItem("youfind-page", page);
+  localStorage.setItem(PAGE_STORAGE_KEY, page);
   document.querySelectorAll(".page-content").forEach((el) => el.classList.add("d-none"));
   document.getElementById(`page-${page}`)?.classList.remove("d-none");
   document.querySelectorAll("[data-page]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.page === page);
   });
 
-  if (page === "videos") loadVideos(true);
-  if (page === "channels") loadChannels();
-  if (page === "discover") { loadTopics(); populateTopicFilter(); }
-  if (page === "related") loadRelatedPage();
-  if (page === "settings") loadSettings();
+  if (page === APP_PAGES.VIDEOS) loadVideos(true);
+  if (page === APP_PAGES.CHANNELS) loadChannels();
+  if (page === APP_PAGES.DISCOVER) { loadTopics(); populateTopicFilter(); }
+  if (page === APP_PAGES.RELATED) loadRelatedPage();
+  if (page === APP_PAGES.SETTINGS) loadSettings();
 }

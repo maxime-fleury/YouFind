@@ -2,7 +2,7 @@
 
 **Découvre et organise des chaînes YouTube sans algorithme, sans pub, sans tracker.**
 
-> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md), puis consulter [`STRUCTURE.md`](STRUCTURE.md) pour le rôle détaillé de chaque fichier.
+> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md), puis consulter [`agents/FILES.md`](agents/FILES.md) pour le rôle de chaque fichier. L'architecture détaillée est dans [`agents/ARCHITECTURE.md`](agents/ARCHITECTURE.md) et la stratégie de tests dans [`agents/TESTING.md`](agents/TESTING.md). [`STRUCTURE.md`](STRUCTURE.md) reste l'index rapide.
 
 YouFind est un outil de curation vidéo qui tourne en local. Au lieu de subir l'algorithme de YouTube, tu ajoutes toi-même des chaînes, les organises par thèmes, découvres des chaînes similaires, et laisses un LLM local t'aider à prioriser ce qui mérite ton temps.
 
@@ -15,7 +15,7 @@ YouTube veut te garder le plus longtemps possible. YouFind fait l'inverse : il t
 - **Scraping HTML uniquement** — gratuit, zéro clé API, zéro quota. Aucune dépendance à l'API YouTube Data v3
 - **LLM local** (Ollama, LM Studio, OpenRouter) pour scorer la pertinence des chaînes
 - **Feed RSS** de YouTube pour récupérer les vidéos (gratuit)
-- **Base SQLite** en local, rien ne sort de ta machine
+- **Base SQLite** en local ; seuls les prompts passent par OpenRouter si tu choisis ce fournisseur cloud
 - **Tout tourne chez toi** — aucune dépendance externe payante, zéro télémétrie
 
 ---
@@ -114,7 +114,7 @@ bun install
 Tout est configurable depuis l'interface web (onglet **Réglages**). Tu peux aussi utiliser un fichier `.env` :
 
 ```env
-PORT=3001                          # Port du serveur (défaut : 3000)
+PORT=3000                          # Port du serveur
 HOST=127.0.0.1                     # Hôte (défaut : 127.0.0.1)
 
 # LLM
@@ -137,7 +137,7 @@ bun run dev      # Avec hot-reload
 bun run start    # Sans hot-reload
 ```
 
-Ouvre **http://localhost:3001** (ou le port configuré).
+Ouvre **http://localhost:3000** (ou le port configuré).
 
 ## Commandes utiles
 
@@ -145,6 +145,8 @@ Ouvre **http://localhost:3001** (ou le port configuré).
 bun run cron     # Exécute RSS + découverte immédiatement
 bun run refresh  # Rafraîchit les vidéos RSS (sortie JSON)
 bun run backup   # Sauvegarde manuelle de la base
+bun test         # Tests unitaires et SQLite isolés
+bun run check    # Vérification syntaxique des modules
 ```
 
 ---
@@ -156,8 +158,10 @@ youfind/
 ├── src/
 │   ├── server.js        # Serveur HTTP (Bun), ~70 routes API, fichiers statiques
 │   ├── db.js            # Base SQLite, migrations, tables, index, prepared statements
-│   ├── youtube-api.js   # Scraping YouTube (HTML parsing, InnerTube API, découverte)
+│   ├── youtube-api.js   # Scraping YouTube (réseau et orchestration)
+│   ├── youtube-parsers.js # Parseurs YouTube purs et testables sans réseau
 │   ├── rss.js           # Récupération des vidéos via RSS YouTube + scraping fallback
+│   ├── rss-parser.js    # Parseur RSS pur et testable sur fixtures
 │   ├── llm.js           # Scoring LLM (Ollama, LM Studio, OpenRouter)
 │   ├── cron.js          # Tâches planifiées (RSS 24h, découverte 3j, backup quotidien)
 │   ├── backup.js        # Sauvegarde SQLite (VACUUM INTO + rotation)
@@ -165,8 +169,22 @@ youfind/
 │   ├── job-utils.js     # IDs et trackers de progression
 │   ├── job-repository.js # Persistance et récupération des jobs SQLite
 │   └── migrations.js    # Migrations versionnées de l'infrastructure
+├── AGENTS.md               # Point d'entrée court pour les agents IA
+├── agents/                 # Documentation technique spécialisée (< 500 lignes/fichier)
+│   ├── FILES.md
+│   ├── ARCHITECTURE.md
+│   ├── DATABASE.md
+│   ├── CONTRACTS.md
+│   └── TESTING.md
+├── TESTING.md             # Index de compatibilité vers agents/TESTING.md
+├── tests/                  # Tests unitaires et fixtures locales
+│   ├── http-helpers.test.js
+│   ├── jobs.test.js
+│   ├── parsers.test.js
+│   └── utils.test.js
 ├── public/
 │   ├── index.html       # SPA (Bootstrap 5, Bootstrap Icons)
+│   ├── js/glob.constants.js # Constantes frontend partagées
 │   ├── js/api.js        # Client API partagé (timeout et annulation)
 │   ├── js/poller.js     # Polling générique des jobs asynchrones
 │   ├── js/glob.utils.js # Utilitaires frontend globaux (formatage, sécurité, export)
@@ -266,9 +284,11 @@ Les jobs de scoring et de découverte similaire sont enregistrés dans SQLite. U
 
 ### Frontend modulaire
 
-Les scripts frontend restent des scripts classiques (et non des modules ES) pour préserver les fonctions globales utilisées par les handlers inline de la SPA. L'ordre de chargement est `api.js`, `poller.js`, `glob.utils.js`, `core.js`, `stats.js`, `videos.js`, `settings.js`, puis `app.js`. Les helpers globaux sont donc disponibles avant les modules de page. Cette organisation permet d'extraire progressivement les pages sans changer les contrats HTML existants.
+Les scripts frontend restent des scripts classiques (et non des modules ES) pour préserver les fonctions globales utilisées par les handlers inline de la SPA. L'ordre de chargement est `glob.constants.js`, `api.js`, `poller.js`, `glob.utils.js`, `core.js`, `stats.js`, `videos.js`, `settings.js`, puis `app.js`. Les constantes et helpers globaux sont donc disponibles avant les modules de page. Cette organisation permet d'extraire progressivement les pages sans changer les contrats HTML existants.
 
 Le CSS est chargé via `style.css`, qui agit comme manifeste et importe `base.css`, `glob.utils.css`, puis les feuilles thématiques. `base.css` contient encore les fondations et une partie des styles historiques ; les nouveaux styles globaux vont dans `glob.utils.css`, tandis que les styles de page doivent être ajoutés dans la feuille thématique correspondante.
+
+La suite de tests est volontairement sans réseau et sans base utilisateur. Voir [`TESTING.md`](TESTING.md) pour les conventions de fixtures, le smoke test et les priorités de couverture.
 
 ### Scoring
 
