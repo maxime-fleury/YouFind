@@ -1,0 +1,47 @@
+/* Topics: badges and picker pills used by discovery and channel modals. */
+.topic-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 12px;
+  font-size: 0.7rem;
+  color: var(--purple-300);
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.topic-badge:hover { background: rgba(139, 92, 246, 0.25); }
+.topic-badge i { opacity: 0.5; transition: opacity 0.2s; }
+.topic-badge:hover i { opacity: 1; color: var(--accent-red); }
+.topic-badge.topic-add {
+  border-style: dashed;
+  border-radius: 6px;
+  color: var(--purple-400);
+  cursor: pointer;
+  padding: 2px 12px;
+}
+.topic-badge.topic-add:hover { background: rgba(139, 92, 246, 0.25); color: var(--purple-200); }
+.topic-select-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  background: rgba(139, 92, 246, 0.08);
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+}
+.topic-select-pill:hover { background: rgba(139, 92, 246, 0.15); color: var(--purple-300); border-color: var(--purple-500); }
+.topic-select-pill.selected {
+  background: rgba(139, 92, 246, 0.28);
+  color: var(--purple-300);
+  border-color: var(--purple-500);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+.topic-picker-list { max-height: 320px; overflow-y: auto; padding: 2px; }

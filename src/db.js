@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { join } from "path";
+import { runMigrations } from "./migrations.js";
 
 const DB_PATH = join(import.meta.dir, "..", "youfind.db");
 
@@ -7,6 +8,12 @@ const db = new Database(DB_PATH);
 
 db.run("PRAGMA journal_mode = WAL;");
 db.run("PRAGMA foreign_keys = ON;");
+
+function ensureColumn(table, column, definition) {
+  const exists = db.query(`PRAGMA table_info(${table})`).all()
+    .some((entry) => entry.name === column);
+  if (!exists) db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
 
 db.run(`
   CREATE TABLE IF NOT EXISTS channels (
@@ -40,16 +47,13 @@ db.run(`
   );
 `);
 
-// Migration: add duration column for existing databases
-try { db.run("ALTER TABLE videos ADD COLUMN duration INTEGER DEFAULT 0"); } catch {}
-
-// Migration: track last RSS refresh per channel so the bulk refresh can skip
-// channels that were refreshed moments ago (nothing new can have appeared).
-try { db.run("ALTER TABLE channels ADD COLUMN last_refresh TEXT"); } catch {}
-
-// Migration: store the channel description so scoring can fall back to it
-// when a channel has no videos yet (e.g. freshly discovered on the Similaires page).
-try { db.run("ALTER TABLE channels ADD COLUMN description TEXT"); } catch {}
+// Legacy schema migrations are explicit and fail loudly instead of hiding
+// unrelated SQLite errors behind a broad catch.
+ensureColumn("videos", "duration", "INTEGER DEFAULT 0");
+// Track last RSS refresh per channel so bulk refresh can skip recent runs.
+ensureColumn("channels", "last_refresh", "TEXT");
+// Store the channel description for scoring channels without videos.
+ensureColumn("channels", "description", "TEXT");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS topics (
@@ -61,8 +65,8 @@ db.run(`
   );
 `);
 
-// Migration: add display_order column for existing databases
-try { db.run("ALTER TABLE topics ADD COLUMN display_order INTEGER DEFAULT 0"); } catch {}
+// Migration: add display_order column for existing databases.
+ensureColumn("topics", "display_order", "INTEGER DEFAULT 0");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS feedback_log (
@@ -111,6 +115,10 @@ db.run(`
   );
 `);
 db.run(`CREATE INDEX IF NOT EXISTS idx_watched_at ON watched_videos(watched_at DESC);`);
+
+// Infrastructure schema is versioned separately from the legacy bootstrap above.
+// Run it before FTS repair and data backfills so incompatible databases fail early.
+runMigrations(db);
 
 // --- FTS5 full-text search index for videos ---
 db.run(`
@@ -173,19 +181,11 @@ try {
 }
 
 // --- FTS5 full-text search index for channels (trigram => substring search) ---
-// Standalone FTS5 table (no content= linkage). External-content FTS5 tables can
-// throw SQLITE_CORRUPT_VTAB when the index falls out of sync with the content
-// table (e.g. a crash mid-backfill), and a stale index never heals by itself.
-// We rebuild from scratch on every startup so the index always matches the
-// channels table (a few thousand rows rebuild in milliseconds).
-function rebuildChannelsFts() {
-  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ai;`);
-  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ad;`);
-  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_au;`);
-  db.run(`DROP TABLE IF EXISTS channels_fts;`);
-
+// Standalone FTS5 table (no content= linkage). Keep it synchronized with
+// triggers and repair it only when the cheap consistency check detects drift.
+function createChannelsFtsSchema() {
   db.run(`
-    CREATE VIRTUAL TABLE channels_fts USING fts5(
+    CREATE VIRTUAL TABLE IF NOT EXISTS channels_fts USING fts5(
       nom,
       tokenize='trigram'
     );
@@ -194,31 +194,55 @@ function rebuildChannelsFts() {
   // NOTE: trigger names are prefixed (channels_fts_idx_*) to avoid clobbering the
   // pre-existing channels_fts_au trigger that syncs videos_fts on channel rename.
   db.run(`
-    CREATE TRIGGER channels_fts_idx_ai AFTER INSERT ON channels
+    CREATE TRIGGER IF NOT EXISTS channels_fts_idx_ai AFTER INSERT ON channels
     BEGIN
       INSERT INTO channels_fts(rowid, nom) VALUES (new.id, new.nom);
     END;
 
-    CREATE TRIGGER channels_fts_idx_ad AFTER DELETE ON channels
+    CREATE TRIGGER IF NOT EXISTS channels_fts_idx_ad AFTER DELETE ON channels
     BEGIN
       DELETE FROM channels_fts WHERE rowid = old.id;
     END;
 
-    CREATE TRIGGER channels_fts_idx_au AFTER UPDATE OF nom ON channels
+    CREATE TRIGGER IF NOT EXISTS channels_fts_idx_au AFTER UPDATE OF nom ON channels
     BEGIN
       DELETE FROM channels_fts WHERE rowid = old.id;
       INSERT INTO channels_fts(rowid, nom) VALUES (new.id, new.nom);
     END;
   `);
+}
 
+function rebuildChannelsFts() {
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ai;`);
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_ad;`);
+  db.run(`DROP TRIGGER IF EXISTS channels_fts_idx_au;`);
+  db.run(`DROP TABLE IF EXISTS channels_fts;`);
+  createChannelsFtsSchema();
   db.run(`INSERT INTO channels_fts(rowid, nom) SELECT id, nom FROM channels;`);
 }
 
+function ensureChannelsFts() {
+  createChannelsFtsSchema();
+  const channelCount = db.query("SELECT count(*) AS count FROM channels").get().count;
+  const indexedCount = db.query("SELECT count(*) AS count FROM channels_fts").get().count;
+  const hasMismatch = db.query(`
+    SELECT 1
+    FROM channels c
+    LEFT JOIN channels_fts f ON f.rowid = c.id
+    WHERE f.rowid IS NULL OR f.nom != c.nom
+    LIMIT 1
+  `).get();
+  if (channelCount !== indexedCount || hasMismatch) {
+    db.run("DELETE FROM channels_fts");
+    db.run("INSERT INTO channels_fts(rowid, nom) SELECT id, nom FROM channels");
+    console.log("[DB] Channels FTS index repaired.");
+  }
+}
+
 try {
-  rebuildChannelsFts();
-  console.log("[DB] Channels FTS index rebuilt.");
+  ensureChannelsFts();
 } catch (e) {
-  console.error("[DB] Failed to rebuild channels FTS index:", e.message);
+  console.error("[DB] Failed to verify channels FTS index:", e.message);
 }
 
 // Backfill rejected channels from feedback_log (for historical data before we kept channels in DB)

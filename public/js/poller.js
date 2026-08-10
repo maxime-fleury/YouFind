@@ -85,7 +85,9 @@ async function pollJob({
     onProgress?.(data);
 
     if (data.status === "done" || data.status === "cancelled") return data;
-    if (data.status === "error") throw new Error(data.error || "Erreur pendant le job");
+    if (data.status === "error" || data.status === "interrupted") {
+      throw new Error(data.error || "Le job a été interrompu par le serveur");
+    }
   }
 
   throw new Error("Le suivi a expiré après deux heures, mais le job peut continuer sur le serveur.");

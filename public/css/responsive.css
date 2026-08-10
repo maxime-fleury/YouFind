@@ -1,0 +1,60 @@
+/* Shared responsive and accessibility-oriented presentation rules. */
+.scroll-top-btn {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 1040;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(196, 181, 253, 0.35);
+  border-radius: 50%;
+  color: var(--purple-200);
+  background: rgba(45, 10, 90, 0.85);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(76, 29, 149, 0.35);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(14px) scale(0.9);
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.scroll-top-btn.visible { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+.scroll-top-btn:hover { color: #fff; background: rgba(91, 33, 182, 0.95); border-color: rgba(196, 181, 253, 0.6); transform: translateY(-2px); }
+.scroll-top-btn:active { transform: translateY(0) scale(0.94); }
+.scroll-top-btn i { font-size: 1.1rem; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-deep); }
+::-webkit-scrollbar-thumb { background: var(--purple-800); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--purple-700); }
+
+.text-muted, .form-text { color: var(--text-muted) !important; }
+.form-text { font-size: 0.8rem; margin-top: 6px; opacity: 0.9; }
+
+@media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 768px) {
+  .channel-card .ch-actions { width: 100%; }
+  .stats-overview { padding: 12px; }
+  .stats-overview-head { align-items: flex-start; flex-direction: column; }
+  .stats-overview-subtitle { white-space: normal; }
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats-card--overview { grid-column: span 2; }
+  .stat-card .stat-value { font-size: 1.5rem; }
+  .discover-hero { align-items: flex-start; }
+  .discover-hero-orbit { width: 52px; height: 52px; flex-basis: 52px; border-radius: 17px; font-size: 1.15rem; }
+  .discover-search-heading, .discover-section-heading, .topics-panel-heading { flex-direction: column; }
+  .discover-form { flex-wrap: wrap; }
+  .discover-input-wrap { flex-basis: 100%; }
+  .discover-submit, .discover-save-topic { flex: 1; min-width: 0; }
+  .discover-result-modern { align-items: flex-start; flex-wrap: wrap; }
+  .discover-result-modern .dr-info { min-width: calc(100% - 64px); }
+  .discover-result-modern .dr-actions { width: 100%; margin-left: 62px; }
+  .discover-result-modern .dr-actions .btn { flex: 1; }
+  .settings-hero { align-items: flex-start; }
+  .settings-card-heading { flex-wrap: wrap; }
+  .settings-health { width: 100%; margin-left: 50px; text-align: left; }
+  .settings-actions { align-items: flex-start; flex-direction: column; }
+  .settings-save-state { white-space: normal; }
+}

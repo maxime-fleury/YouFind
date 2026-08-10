@@ -5,6 +5,8 @@ import { discoverFromTopic, resolveChannel, scrapeChannelInfo, resolveFromVideoU
 import { scoreChannel, scoreAllPending, scoreAllUnscored, rescoreAllChannels, checkLLMHealth } from "./llm.js";
 import { runWithLimit } from "./utils.js";
 import { createJobId, createProgressTracker, resetProgressTracker } from "./job-utils.js";
+import { createJob, getJob, updateJob, finishJob, recoverInterruptedJobs } from "./job-repository.js";
+import { readJsonBody, parsePositiveId, isYoutubeChannelId } from "./http-helpers.js";
 import { startCron, getRSSInfo, markRSSLastRun } from "./cron.js";
 
 // ═══ CONFIG ═══
@@ -21,6 +23,7 @@ const CORS_HEADERS = {
 };
 // Backups can legitimately contain the full local video catalog.
 const MAX_JSON_BODY_BYTES = 128 * 1024 * 1024;
+const readBody = (req) => readJsonBody(req, MAX_JSON_BODY_BYTES);
 
 const SETTINGS_KEYS = new Set([
   "llm_provider",
@@ -48,29 +51,6 @@ function json(data, status = 200) {
     status,
     headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
-}
-
-async function readBody(req) {
-  const declaredLength = Number(req.headers.get("content-length") || 0);
-  if (declaredLength > MAX_JSON_BODY_BYTES) {
-    const error = new Error("Request body too large");
-    error.status = 413;
-    throw error;
-  }
-  try {
-    const text = await req.text();
-    if (text.length > MAX_JSON_BODY_BYTES) {
-      const error = new Error("Request body too large");
-      error.status = 413;
-      throw error;
-    }
-    if (!text.trim()) return {};
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch (error) {
-    if (error.status === 413) throw error;
-    return {};
-  }
 }
 
 // ═══ STATIC FILE SERVING ═══
@@ -116,6 +96,7 @@ let isRefreshingPendingVideos = false;
 let isRefreshingStats = false;
 let isScoring = false;
 let scoringJobId = null;
+let scoringAbortController = null;
 const scoringProgress = createProgressTracker({ jobId: null, mode: "", scored: 0, failed: 0, failures: [], error: "" });
 let isRelatedRunning = false;
 let relatedJobId = null;
@@ -126,6 +107,10 @@ const refreshVideosProgress = createProgressTracker({ errors: 0 });
 const pendingVideosProgress = createProgressTracker({ errors: 0 });
 const refreshStatsProgress = createProgressTracker();
 const relatedProgress = createProgressTracker({ found: 0, results: [], error: "" });
+
+// Jobs cannot continue after a process crash. Marking them explicitly makes
+// recovery visible to the UI instead of leaving a permanent "running" state.
+recoverInterruptedJobs();
 
 // ═══ RATE LIMITER ═══
 // Simple in-memory rate limiter: 120 requests per minute per IP
@@ -174,6 +159,8 @@ function startScoringJob(mode, scorer) {
 
   isScoring = true;
   scoringJobId = createJobId();
+  createJob({ id: scoringJobId, type: "scoring", mode });
+  scoringAbortController = new AbortController();
   resetProgressTracker(scoringProgress, {
     jobId: scoringJobId,
     mode,
@@ -191,36 +178,44 @@ function startScoringJob(mode, scorer) {
       scoringProgress.failed = progress.failed;
       scoringProgress.failures = progress.failures || [];
       scoringProgress.current = progress.current || "";
-    }))
+      updateJob(scoringJobId, {
+        total: progress.total,
+        completed: progress.completed,
+        succeeded: progress.scored,
+        failed: progress.failed,
+        current: progress.current || "",
+        failures: progress.failures || [],
+      });
+    }, { signal: scoringAbortController.signal }))
     .then((results) => {
       scoringProgress.status = "done";
       scoringProgress.total = Math.max(scoringProgress.total, scoringProgress.completed);
       scoringProgress.completed = scoringProgress.total;
       scoringProgress.scored = results.length;
+      finishJob(scoringJobId, "done", {
+        total: scoringProgress.total,
+        completed: scoringProgress.completed,
+        succeeded: scoringProgress.scored,
+        failed: scoringProgress.failed,
+        failures: scoringProgress.failures,
+      });
     })
     .catch((err) => {
-      scoringProgress.status = "error";
-      scoringProgress.error = err.message;
-      console.error(`[LLM] ${mode} scoring error:`, err.message);
+      const cancelled = err.name === "AbortError" || err.message === "Aborted";
+      scoringProgress.error = cancelled ? "Scoring cancelled" : err.message;
+      scoringProgress.status = cancelled ? "cancelled" : "error";
+      finishJob(scoringJobId, cancelled ? "cancelled" : "error", {
+        error: cancelled ? "Scoring cancelled" : err.message,
+        failures: scoringProgress.failures,
+      });
+      console.error(`[LLM] ${mode} scoring ${cancelled ? "cancelled" : "error"}:`, err.message);
     })
     .finally(() => {
       isScoring = false;
+      scoringAbortController = null;
     });
 
   return scoringJobId;
-}
-
-// ═══ VALIDATION HELPERS ═══
-function parsePositiveId(value) {
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const text = String(value).trim();
-  if (!/^\d+$/.test(text)) return null;
-  const id = Number(text);
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
-function isYoutubeChannelId(value) {
-  return typeof value === "string" && /^UC[A-Za-z0-9_-]{22}$/.test(value.trim());
 }
 
 // ═══════════════════════════════════════════
@@ -453,16 +448,50 @@ const server = Bun.serve({
           });
         }
 
-        if (include === "topics,preview") {
-          channels = channels.map((ch) => {
-            const topics = stmts.getChannelTopics.all(ch.channel_id);
-            const preview_videos = ch.status === "pending"
-              ? db.query(
-                  `SELECT titre, thumbnail, vues, url FROM videos WHERE channel_id = ? ORDER BY date_pub DESC LIMIT 3`
-                ).all(ch.channel_id)
-              : [];
-            return { ...ch, topics, preview_videos };
-          });
+        if (include === "topics,preview" && channels.length > 0) {
+          // Resolve optional nested data in two batched queries instead of one
+          // topics query and one preview query per channel.
+          const channelIds = channels.map((channel) => channel.channel_id);
+          const placeholders = channelIds.map(() => "?").join(",");
+          const topicRows = db.query(`
+            SELECT ct.channel_id, t.*
+            FROM channel_topics ct
+            JOIN topics t ON t.id = ct.topic_id
+            WHERE ct.channel_id IN (${placeholders})
+            ORDER BY t.display_order ASC, t.date_ajout DESC
+          `).all(...channelIds);
+          const pendingIds = channels.filter((channel) => channel.status === "pending")
+            .map((channel) => channel.channel_id);
+          const previewRows = pendingIds.length > 0
+            ? db.query(`
+                SELECT channel_id, titre, thumbnail, vues, url
+                FROM (
+                  SELECT v.channel_id, v.titre, v.thumbnail, v.vues, v.url,
+                         ROW_NUMBER() OVER (PARTITION BY v.channel_id ORDER BY v.date_pub DESC) AS row_num
+                  FROM videos v
+                  WHERE v.channel_id IN (${pendingIds.map(() => "?").join(",")})
+                )
+                WHERE row_num <= 3
+              `).all(...pendingIds)
+            : [];
+          const topicsByChannel = new Map();
+          const previewsByChannel = new Map();
+          for (const topic of topicRows) {
+            const list = topicsByChannel.get(topic.channel_id) || [];
+            list.push({ ...topic });
+            topicsByChannel.set(topic.channel_id, list);
+          }
+          for (const video of previewRows) {
+            const list = previewsByChannel.get(video.channel_id) || [];
+            const { channel_id: ignoredChannelId, row_num: ignoredRowNum, ...preview } = video;
+            list.push(preview);
+            previewsByChannel.set(video.channel_id, list);
+          }
+          channels = channels.map((ch) => ({
+            ...ch,
+            topics: topicsByChannel.get(ch.channel_id) || [],
+            preview_videos: previewsByChannel.get(ch.channel_id) || [],
+          }));
         }
 
         return json(channels);
@@ -1075,6 +1104,7 @@ const server = Bun.serve({
 
         isRelatedRunning = true;
         relatedJobId = createJobId();
+        createJob({ id: relatedJobId, type: "related-discovery", mode: "related", payload: { passes, statuses } });
         relatedAbortController = new AbortController();
         relatedPaused = false;
         resetProgressTracker(relatedProgress, {
@@ -1092,6 +1122,12 @@ const server = Bun.serve({
             // "started" callback move the visible counter backwards.
             relatedProgress.completed = Math.max(relatedProgress.completed, completed);
             relatedProgress.current = current || "";
+            updateJob(relatedJobId, {
+              total,
+              completed: relatedProgress.completed,
+              current: current || "",
+              succeeded: relatedProgress.found,
+            });
             if (status === "done") relatedProgress.current = current || "";
           },
           (result) => {
@@ -1100,6 +1136,10 @@ const server = Bun.serve({
             if (relatedAbortController?.signal.aborted) return;
             relatedProgress.results.push(result);
             relatedProgress.found = relatedProgress.results.length;
+            updateJob(relatedJobId, {
+              succeeded: relatedProgress.found,
+              results: relatedProgress.results,
+            });
             // Auto-ingest videos (free) so newly found channels have videos right
             // away, matching the Discover page workflow.
             ingestChannel(result.channelId).catch((err) => console.error("[Related] ingest failed:", err.message));
@@ -1109,14 +1149,33 @@ const server = Bun.serve({
           .then(() => {
             relatedProgress.status = "done";
             relatedProgress.completed = relatedProgress.total;
+            finishJob(relatedJobId, "done", {
+              total: relatedProgress.total,
+              completed: relatedProgress.completed,
+              succeeded: relatedProgress.found,
+              results: relatedProgress.results,
+            });
           })
           .catch((err) => {
             if (err.name === 'AbortError' || err.message === 'Aborted') {
               relatedProgress.status = "cancelled";
+              finishJob(relatedJobId, "cancelled", {
+                total: relatedProgress.total,
+                completed: relatedProgress.completed,
+                succeeded: relatedProgress.found,
+                results: relatedProgress.results,
+              });
               console.log("[Related] Discovery cancelled by user");
             } else {
               relatedProgress.status = "error";
               relatedProgress.error = err.message;
+              finishJob(relatedJobId, "error", {
+                total: relatedProgress.total,
+                completed: relatedProgress.completed,
+                succeeded: relatedProgress.found,
+                error: err.message,
+                results: relatedProgress.results,
+              });
               console.error("[Related] Discovery error:", err.message);
             }
           })
@@ -1137,8 +1196,23 @@ const server = Bun.serve({
         if (!Number.isInteger(sinceValue) || sinceValue < 0) {
           return json({ error: "since must be a non-negative integer" }, 400);
         }
-        if (requestedJobId !== relatedJobId) {
+        const persistedJob = getJob(requestedJobId, "related-discovery");
+        if (!persistedJob) {
           return json({ error: "Related discovery job is no longer available", jobId: relatedJobId }, 409);
+        }
+        if (requestedJobId !== relatedJobId) {
+          return json({
+            jobId: requestedJobId,
+            total: persistedJob.total,
+            completed: persistedJob.completed,
+            found: persistedJob.succeeded,
+            current: persistedJob.current,
+            status: persistedJob.status,
+            paused: false,
+            error: persistedJob.error || "",
+            results: persistedJob.results.slice(sinceValue),
+            next: persistedJob.results.length,
+          });
         }
         return json({
           jobId: relatedJobId,
@@ -1170,17 +1244,50 @@ const server = Bun.serve({
         }
         relatedPaused = !relatedPaused;
         relatedProgress.status = relatedPaused ? "paused" : "running";
+        updateJob(relatedJobId, { status: relatedProgress.status });
         return json({ ok: true, paused: relatedPaused, status: relatedProgress.status });
       }
 
       // --- API routes handled in fetch (bypass Bun router quirks) ---
 
+      // GET /api/jobs/:id — generic persisted job status for recovery and tooling.
+      if (method === "GET" && pathname.startsWith("/api/jobs/")) {
+        const jobId = decodeURIComponent(pathname.slice("/api/jobs/".length));
+        const job = getJob(jobId);
+        if (!job) return json({ error: "Job not found" }, 404);
+        return json(job);
+      }
+
+      // POST /api/score-cancel — cancel the active background scoring job.
+      if (method === "POST" && pathname === "/api/score-cancel") {
+        if (!isScoring || !scoringAbortController) {
+          return json({ error: "No scoring job in progress" }, 409);
+        }
+        scoringAbortController.abort();
+        return json({ ok: true, status: "cancelling", jobId: scoringJobId });
+      }
+
       // GET /api/score-status?job=... — live progress for background LLM scoring.
       if (method === "GET" && pathname === "/api/score-status") {
         const requestedJobId = url.searchParams.get("job");
         if (!requestedJobId) return json({ error: "job is required" }, 400);
-        if (requestedJobId !== scoringJobId) {
+        const persistedJob = getJob(requestedJobId, "scoring");
+        if (!persistedJob) {
           return json({ error: "Scoring job is no longer available", jobId: scoringJobId }, 409);
+        }
+        if (requestedJobId !== scoringJobId) {
+          return json({
+            jobId: requestedJobId,
+            mode: persistedJob.mode || "",
+            total: persistedJob.total,
+            completed: persistedJob.completed,
+            current: persistedJob.current,
+            status: persistedJob.status,
+            scored: persistedJob.succeeded,
+            failed: persistedJob.failed,
+            failures: persistedJob.failures,
+            error: persistedJob.error || "",
+          });
         }
         return json({ ...scoringProgress });
       }
@@ -1343,8 +1450,10 @@ const server = Bun.serve({
       }
 
     } catch (err) {
-      console.error(`[Fetch] ${method} ${pathname}:`, err.message);
-      return json({ error: err.message || "Internal server error" }, err.status || 500);
+      const status = err.status || 500;
+      const log = status >= 500 ? console.error : console.warn;
+      log(`[Fetch] ${method} ${pathname}:`, err.message);
+      return json({ error: err.message || "Internal server error" }, status);
     }
 
     // --- Static files ---

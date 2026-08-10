@@ -2,6 +2,8 @@
 
 **Découvre et organise des chaînes YouTube sans algorithme, sans pub, sans tracker.**
 
+> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md) avant toute modification.
+
 YouFind est un outil de curation vidéo qui tourne en local. Au lieu de subir l'algorithme de YouTube, tu ajoutes toi-même des chaînes, les organises par thèmes, découvres des chaînes similaires, et laisses un LLM local t'aider à prioriser ce qui mérite ton temps.
 
 ---
@@ -74,7 +76,7 @@ YouTube veut te garder le plus longtemps possible. YouFind fait l'inverse : il t
 - **Thèmes sauvegardés** comme favoris pour relancer une découverte en un clic
 
 ### 💾 Sauvegarde
-- **Export/Import complet** en un fichier JSON : settings, topics (ordre), chaînes (statut), vidéos vues
+- **Export/Import complet** en un fichier JSON : settings, topics (ordre), chaînes, vidéos, feedback et vidéos vues
 - Boutons dans l'onglet **Réglages**
 - Pratique pour migrer ou partager sa configuration
 
@@ -159,11 +161,25 @@ youfind/
 │   ├── llm.js           # Scoring LLM (Ollama, LM Studio, OpenRouter)
 │   ├── cron.js          # Tâches planifiées (RSS 24h, découverte 3j, backup quotidien)
 │   ├── backup.js        # Sauvegarde SQLite (VACUUM INTO + rotation)
-│   └── utils.js         # runWithLimit (concurrence contrôlée avec délai)
+│   ├── utils.js         # runWithLimit (concurrence contrôlée avec délai)
+│   ├── job-utils.js     # IDs et trackers de progression
+│   ├── job-repository.js # Persistance et récupération des jobs SQLite
+│   └── migrations.js    # Migrations versionnées de l'infrastructure
 ├── public/
 │   ├── index.html       # SPA (Bootstrap 5, Bootstrap Icons)
-│   ├── js/app.js        # ~2900 lignes : navigation, composants, API client, state
-│   └── css/style.css    # ~2100 lignes : thème dark purple glassmorphism
+│   ├── js/api.js        # Client API partagé (timeout et annulation)
+│   ├── js/poller.js     # Polling générique des jobs asynchrones
+│   ├── js/core.js       # État, navigation, formatage et toasts
+│   ├── js/stats.js      # Dashboard et compte à rebours RSS
+│   ├── js/videos.js     # Feed vidéo, pagination et prefetch
+│   ├── js/settings.js   # Réglages LLM et gestion des secrets
+│   ├── js/app.js        # Fonctionnalités restantes et façade historique
+│   ├── css/style.css    # Manifeste CSS et ordre des imports
+│   ├── css/base.css     # Fondations, composants partagés et styles legacy
+│   ├── css/videos.css   # Feed vidéo et états de chargement
+│   ├── css/channels.css # Recherche et contrôles des chaînes
+│   ├── css/topics.css   # Badges et sélecteur de topics
+│   └── css/responsive.css # Responsive et règles transversales
 ├── backups/             # Sauvegardes automatiques (14 jours)
 ├── youfind.db           # Base SQLite (créée automatiquement)
 ├── package.json
@@ -183,6 +199,8 @@ youfind/
 | `feedback_log` | Historique des validations/rejets (utilisé dans le prompt LLM) |
 | `settings` | Configuration clé-valeur |
 | `watched_videos` | URLs des vidéos regardées (avec date) |
+| `jobs` | Jobs asynchrones, progression, erreurs et résultats récupérables |
+| `schema_migrations` | Historique des migrations d'infrastructure appliquées |
 | `channels_fts` | Index full-text FTS5 (trigram tokenizer) pour la recherche de chaînes |
 | `videos_fts` | Index full-text FTS5 pour la recherche de vidéos |
 
@@ -236,6 +254,20 @@ Toutes les routes sont préfixées par `/api/`. Les réponses sont en JSON.
 | POST | `/discover/related/cancel` | Annuler l'exploration en cours |
 | POST | `/discover/related/pause` | Pause / Reprendre |
 
+### Jobs persistants
+
+| Méthode | Chemin | Description |
+|---|---|---|
+| GET | `/jobs/:id` | État d'un job, récupérable après un rechargement ou un redémarrage |
+
+Les jobs de scoring et de découverte similaire sont enregistrés dans SQLite. Un job actif au moment d'un arrêt est marqué `interrupted` au prochain démarrage ; il n'est pas relancé automatiquement, car les appels externes ne sont pas nécessairement idempotents.
+
+### Frontend modulaire
+
+Les scripts frontend restent des scripts classiques (et non des modules ES) pour préserver les fonctions globales utilisées par les handlers inline de la SPA. L'ordre de chargement est `api.js`, `poller.js`, `core.js`, `stats.js`, `videos.js`, `settings.js`, puis `app.js`. Cette organisation permet d'extraire progressivement les pages sans changer les contrats HTML existants.
+
+Le CSS est chargé via `style.css`, qui agit comme manifeste et importe `base.css` puis les feuilles thématiques. `base.css` contient encore les fondations et une partie des styles historiques ; les nouveaux styles de page doivent être ajoutés dans la feuille thématique correspondante.
+
 ### Scoring
 
 | Méthode | Chemin | Description |
@@ -244,6 +276,7 @@ Toutes les routes sont préfixées par `/api/`. Les réponses sont en JSON.
 | POST | `/score-unscored` | Scorer toutes les chaînes sans score |
 | POST | `/rescore-all` | Reset + re-scorer toutes les chaînes |
 | GET | `/score-status` | Progression du scoring (polling) |
+| POST | `/score-cancel` | Annuler le scoring en cours |
 
 ### Vidéos (ingestion)
 

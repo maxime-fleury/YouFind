@@ -80,7 +80,13 @@ function truncatePrompt(prompt, maxChars = 6000) {
   return (lastNewline > maxChars * 0.8 ? truncated.substring(0, lastNewline) : truncated) + "\n[truncated]";
 }
 
-async function callOllama(prompt) {
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw signal.reason || Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+  }
+}
+
+async function callOllama(prompt, signal) {
   const cfg = getLLMConfig();
   const res = await fetch(`${cfg.ollama_url}/api/generate`, {
     method: "POST",
@@ -91,7 +97,7 @@ async function callOllama(prompt) {
       stream: false,
       options: { temperature: 0.3, num_predict: 512 },
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
   });
 
   if (!res.ok) {
@@ -106,7 +112,7 @@ async function callOllama(prompt) {
   return data.response;
 }
 
-async function callLMStudio(prompt) {
+async function callLMStudio(prompt, signal) {
   const cfg = getLLMConfig();
   const res = await fetch(`${cfg.lmstudio_url}/v1/chat/completions`, {
     method: "POST",
@@ -118,7 +124,7 @@ async function callLMStudio(prompt) {
       max_tokens: 512,
       stream: false,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
   });
 
   if (!res.ok) {
@@ -133,7 +139,7 @@ async function callLMStudio(prompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function callOpenRouter(prompt) {
+async function callOpenRouter(prompt, signal) {
   const cfg = getLLMConfig();
   if (!cfg.openrouter_key) {
     throw new Error("OpenRouter key not configured");
@@ -151,7 +157,7 @@ async function callOpenRouter(prompt) {
       temperature: 0.3,
       max_tokens: 512,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120000)]) : AbortSignal.timeout(120000),
   });
 
   if (!res.ok) {
@@ -166,15 +172,15 @@ async function callOpenRouter(prompt) {
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function callLLM(prompt) {
+async function callLLM(prompt, signal) {
   const provider = getSetting("llm_provider", "ollama");
   switch (provider) {
     case "openrouter":
-      return callOpenRouter(prompt);
+      return callOpenRouter(prompt, signal);
     case "lmstudio":
-      return callLMStudio(prompt);
+      return callLMStudio(prompt, signal);
     default:
-      return callOllama(prompt);
+      return callOllama(prompt, signal);
   }
 }
 
@@ -250,7 +256,8 @@ function assignTopicsFromLLM(channelId, topicNames) {
   }
 }
 
-export async function scoreChannel(channelId) {
+export async function scoreChannel(channelId, { signal = null } = {}) {
+  throwIfAborted(signal);
   const channel = stmts.getChannelByYoutubeId.get(channelId);
   if (!channel) {
     console.error(`[LLM] Channel ${channelId} not found`);
@@ -275,14 +282,17 @@ export async function scoreChannel(channelId) {
       try {
         const check = await fetch(`https://www.youtube.com/channel/${channelId}`, {
           headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(8000),
+          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(8000)]) : AbortSignal.timeout(8000),
         });
         if (check.status === 404) {
           reason = 'channel no longer exists on YouTube (404)';
         } else if (check.ok) {
           reason = 'channel exists but has no public videos';
         }
-      } catch { /* keep default reason */ }
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Keep the default reason when YouTube cannot be reached.
+      }
       console.log(`[LLM] No videos or channel description found for "${channel.nom}", skipping`);
       return { ok: false, reason };
     }
@@ -295,11 +305,12 @@ export async function scoreChannel(channelId) {
   let prompt = truncatePrompt(buildPrompt(allTopics, videos, feedbackHistory, { channelDesc: channel.description || "" }));
 
   try {
-    const response = await callLLM(prompt).catch(async (err) => {
+    const response = await callLLM(prompt, signal).catch(async (err) => {
+      if (signal?.aborted) throw err;
       if (err.message?.includes("422")) {
         console.warn(`[LLM] 422 for "${channel.nom}" — retrying with reduced context.`);
         prompt = buildPrompt(allTopics, videos.slice(0, 2), feedbackHistory.slice(0, 3), { maxDesc: 100, maxFeedback: 3, channelDesc: channel.description || "" });
-        return callLLM(truncatePrompt(prompt, 3000));
+        return callLLM(truncatePrompt(prompt, 3000), signal);
       }
       throw err;
     });
@@ -321,12 +332,14 @@ export async function scoreChannel(channelId) {
     console.log(`[LLM] "${channel.nom}" scored ${parsed.score}/100, topics: [${parsed.topics.join(", ")}]`);
     return { ok: true, ...parsed };
   } catch (err) {
+    if (signal?.aborted) throw err;
     console.error(`[LLM] Error scoring "${channel.nom}":`, err.message);
     return { ok: false, reason: `LLM error: ${err.message}` };
   }
 }
 
-async function scoreChannelList(channels, onProgress) {
+async function scoreChannelList(channels, onProgress, { signal = null } = {}) {
+  throwIfAborted(signal);
   const results = [];
   const failures = [];
   let completed = 0;
@@ -338,7 +351,7 @@ async function scoreChannelList(channels, onProgress) {
   await runWithLimit(
     channels,
     async (ch) => {
-      const result = await scoreChannel(ch.channel_id);
+      const result = await scoreChannel(ch.channel_id, { signal });
       if (result?.ok) {
         results.push({ channel: ch.nom, ...result });
       } else {
@@ -358,27 +371,28 @@ async function scoreChannelList(channels, onProgress) {
       });
     },
     concurrency,
-    1000
+    1000,
+    { signal }
   );
   return results;
 }
 
-export async function scoreAllPending(onProgress) {
+export async function scoreAllPending(onProgress, options = {}) {
   const pending = stmts.getPendingChannels.all();
   console.log(`[LLM] Scoring ${pending.length} pending channels...`);
-  return scoreChannelList(pending, onProgress);
+  return scoreChannelList(pending, onProgress, options);
 }
 
-export async function scoreAllUnscored(onProgress) {
+export async function scoreAllUnscored(onProgress, options = {}) {
   const unscored = stmts.getUnscoredChannels.all();
   console.log(`[LLM] Scoring ${unscored.length} unscored channels...`);
-  return scoreChannelList(unscored, onProgress);
+  return scoreChannelList(unscored, onProgress, options);
 }
 
-export async function rescoreAllChannels(onProgress) {
+export async function rescoreAllChannels(onProgress, options = {}) {
   stmts.resetAllScores.run();
   console.log("[LLM] All scores reset. Rescoring everything...");
-  return scoreAllUnscored(onProgress);
+  return scoreAllUnscored(onProgress, options);
 }
 
 export async function checkLLMHealth() {
