@@ -941,6 +941,20 @@ main, nav, .modal-content {
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 
+.lang-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(147, 197, 253, 0.15);
+  color: var(--accent-blue, #60a5fa);
+  border: 1px solid rgba(147, 197, 253, 0.25);
+}
+
 .llm-score {
   display: inline-flex;
   align-items: center;

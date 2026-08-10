@@ -54,6 +54,8 @@ ensureColumn("videos", "duration", "INTEGER DEFAULT 0");
 ensureColumn("channels", "last_refresh", "TEXT");
 // Store the channel description for scoring channels without videos.
 ensureColumn("channels", "description", "TEXT");
+// Detected language code (fr, en, ru, es, de, or null)
+ensureColumn("channels", "language", "TEXT");
 
 db.run(`
   CREATE TABLE IF NOT EXISTS topics (
@@ -334,14 +336,14 @@ initSettings();
 
 const stmts = {
   insertChannel: db.prepare(`
-    INSERT OR IGNORE INTO channels (nom, channel_id, subscriber_count, last_video_date, thumbnail, description)
-    VALUES ($nom, $channel_id, $subscriber_count, $last_video_date, $thumbnail, $description)
+    INSERT OR IGNORE INTO channels (nom, channel_id, subscriber_count, last_video_date, thumbnail, description, language)
+    VALUES ($nom, $channel_id, $subscriber_count, $last_video_date, $thumbnail, $description, $language)
   `),
   upsertImportedChannel: db.prepare(`
     INSERT INTO channels
-      (nom, channel_id, status, date_ajout, raison_rejet, subscriber_count, last_video_date, llm_summary, llm_score, thumbnail, description, last_refresh)
+      (nom, channel_id, status, date_ajout, raison_rejet, subscriber_count, last_video_date, llm_summary, llm_score, thumbnail, description, last_refresh, language)
     VALUES
-      ($nom, $channel_id, $status, $date_ajout, $raison_rejet, $subscriber_count, $last_video_date, $llm_summary, $llm_score, $thumbnail, $description, $last_refresh)
+      ($nom, $channel_id, $status, $date_ajout, $raison_rejet, $subscriber_count, $last_video_date, $llm_summary, $llm_score, $thumbnail, $description, $last_refresh, $language)
     ON CONFLICT(channel_id) DO UPDATE SET
       nom = excluded.nom,
       status = excluded.status,
@@ -353,7 +355,8 @@ const stmts = {
       llm_score = excluded.llm_score,
       thumbnail = excluded.thumbnail,
       description = excluded.description,
-      last_refresh = excluded.last_refresh
+      last_refresh = excluded.last_refresh,
+      language = excluded.language
   `),
 
   getChannelByYoutubeId: db.prepare(`SELECT * FROM channels WHERE channel_id = ?`),

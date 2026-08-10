@@ -148,6 +148,7 @@ function renderChannels(searchQuery, channels = _allChannels) {
           <div class="d-flex align-items-center gap-2">
             <a href="javascript:void(0)" onclick="openChannelDetail(${ch.id})" class="ch-name" style="text-decoration:none">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right" style="font-size:0.6rem;opacity:0.4"></i></a>
             <span class="status-badge ${ch.status}">${ch.status}</span>
+            ${renderLanguageBadge(ch.language)}
             ${ch.llm_score != null ? `<span class="llm-score ${ch.llm_score >= 70 ? "high" : ch.llm_score >= 40 ? "medium" : "low"}">${ch.llm_score}/100</span>` : ""}
           </div>
           <div class="ch-meta">
@@ -477,6 +478,15 @@ async function deleteTopic(id) {
   }
 }
 
+function renderLanguageBadge(code) {
+  if (!code) return "";
+  const flags = { fr: "🇫🇷", en: "🇬🇧", ru: "🇷🇺", es: "🇪🇸", de: "🇩🇪" };
+  const labels = { fr: "FR", en: "EN", ru: "RU", es: "ES", de: "DE" };
+  const flag = flags[code] || "";
+  const label = labels[code] || code.toUpperCase();
+  return `<span class="lang-badge" title="${escapeHtml(label)}">${flag} ${label}</span>`;
+}
+
 function renderDiscoveryResults(channels, currentChannels) {
   const results = document.getElementById("discover-results");
   if (!results) return;
@@ -498,7 +508,7 @@ function renderDiscoveryResults(channels, currentChannels) {
       : `<span class="discover-processed"><i class="bi bi-${state === CHANNEL_STATUSES.VALIDATED ? "check-circle" : "x-circle"}"></i> ${labels[state]}</span>`;
     return `<article class="discover-result discover-result-modern" id="dr-${channelId}">
       <div class="dr-avatar">${ch.thumbnail ? `<img src="${safeImageUrl(ch.thumbnail)}" alt="Miniature de ${escapeHtml(ch.nom)}" loading="lazy">` : '<i class="bi bi-person"></i>'}</div>
-      <div class="dr-info"><div class="dr-title-row"><a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener noreferrer" class="dr-name">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right"></i></a><span class="status-badge ${stateClass}">${labels[state]}</span></div><div class="dr-stats"><i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnés <span class="dr-dot">·</span><span>${state === CHANNEL_STATUSES.PENDING ? "À trier" : "Déjà traitée"}</span></div></div>
+      <div class="dr-info"><div class="dr-title-row"><a href="https://youtube.com/channel/${channelId}" target="_blank" rel="noopener noreferrer" class="dr-name">${escapeHtml(ch.nom)} <i class="bi bi-box-arrow-up-right"></i></a><span class="status-badge ${stateClass}">${labels[state]}</span>${renderLanguageBadge(ch.language)}</div><div class="dr-stats"><i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnés <span class="dr-dot">·</span><span>${state === CHANNEL_STATUSES.PENDING ? "À trier" : "Déjà traitée"}</span></div></div>
       <div class="dr-actions">${action}</div>
     </article>`;
   }).join("");
@@ -1603,6 +1613,7 @@ function renderRelatedChannel(ch) {
         <div class="dr-stats">
           <i class="bi bi-people"></i> ${formatNumber(ch.subscriberCount)} abonnes
           <span class="status-badge pending" style="margin-left:8px">en attente</span>
+          ${renderLanguageBadge(ch.language)}
           <span class="text-muted" style="margin-left:6px;font-size:0.75rem"><i class="bi bi-diagram-2"></i> via ${escapeHtml(ch.source_channel || "")}</span>
         </div>
       </div>

@@ -626,6 +626,7 @@ export async function discoverFromTopic(topicQuery, maxResults = 20, offset = 0)
         $last_video_date: null,
         $thumbnail: ch.thumbnail,
         $description: ch.description || "",
+        $language: ch.language || null,
       });
       inserted.push(ch);
     }
@@ -684,6 +685,7 @@ export async function scrapeDiscoverChannels(query, maxResults = 20) {
         if (data.thumbnail) ch.thumbnail = data.thumbnail;
         if (data.subscriberCount) ch.subscriberCount = data.subscriberCount;
         if (data.description) ch.description = data.description;
+        ch.language = detectLanguage(html);
       }
     } catch { /* keep going */ }
 
@@ -862,13 +864,40 @@ export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
   }
 }
 
-// --- French language detection ---
+// --- Language detection ---
 
-function isLikelyFrench(html) {
-  if (!html) return false;
+const LANGUAGES = {
+  fr: {
+    label: 'Français',
+    accents: /[éèêëàâîïôùûüçœÉÈÊËÀÂÎÏÔÙÛÜÇŒ]/,
+    words: /\b(le|la|les|des|pour|dans|avec|sur|une|est|sont|pas|plus|comment|pourquoi|vidéo|abonnés?|français|chaîne|histoire|monde|faire|cette|entre|sans|chez|deux|bien|très|aussi|mais|donc|quand|alors|ainsi|peut|fait|voir|savoir|devoir|vouloir|pouvoir|venir|aller|parler|dire|avoir|être|tout|toute|tous|toutes|leur|leurs|son|ses|notre|nos|votre|vos|ces|cet|elle|elles|nous|vous|ils|encore|toujours|jamais|rien)\b/i,
+  },
+  en: {
+    label: 'English',
+    accents: /[\x00-\x7F]*/,
+    words: /\b(the|and|for|that|with|this|from|have|are|was|not|but|all|can|has|been|were|they|their|more|about|which|when|will|would|some|what|there|your|like|just|than|then|also|very|much|well|back|even|only|over|into|after|between|other|these|those|because|through|being|before|great|still|video|channel|subscribe|watch|please|make|made|making|people|world|time|life|love|best|good)\b/i,
+  },
+  ru: {
+    label: 'Русский',
+    cyrillic: /[А-Яа-яЁё]/,
+    words: /\b(и|в|не|на|что|как|это|по|из|для|за|от|все|так|же|или|если|быть|будет|был|была|были|мой|твой|свой|кто|где|когда|почему|какой|очень|ещё|уже|там|тут|тоже|может|надо|есть|нет|них|тебя|меня|себя|вас|нас|этот|тот|один|два|три|год|лет|день|человек|мир|жизнь|люди|видео|канал|русский|россия)\b/i,
+  },
+  es: {
+    label: 'Español',
+    accents: /[áéíóúüñÁÉÍÓÚÜÑ¿¡]/,
+    words: /\b(el|la|los|las|de|en|que|por|para|con|del|una|las|los|más|como|pero|entre|este|esta|muy|todo|todos|bien|también|porque|cuando|donde|qué|cómo|cuál|quién|hay|ser|está|son|era|fue|han|tiene|hacer|dice|dijo|puede|saber|ver|mundo|vida|gente|canal|video|español|españa|méxico|argentina|colombia)\b/i,
+  },
+  de: {
+    label: 'Deutsch',
+    accents: /[äöüßÄÖÜ]/,
+    words: /\b(der|die|das|und|ist|nicht|mit|von|auf|für|ein|eine|einen|sich|auch|als|bei|nach|wie|über|denn|noch|nur|schon|sehr|immer|wieder|mehr|etwas|alles|nichts|kann|muss|soll|will|wird|haben|werden|machen|sagen|gehen|kommen|sehen|geben|wissen|deutsch|deutschland|welt|leben|leute|video|kanal|geschichte)\b/i,
+  },
+};
+
+function extractChannelTexts(html) {
+  if (!html) return [];
   const texts = [];
 
-  // Channel description from ytInitialData or meta
   const metaDesc = html.match(/<meta\s+name="description"\s+content="([^"]+)"/i);
   if (metaDesc) texts.push(metaDesc[1]);
 
@@ -879,7 +908,6 @@ function isLikelyFrench(html) {
       const metadata = data?.metadata?.channelMetadataRenderer;
       if (metadata?.description) texts.push(metadata.description);
       if (metadata?.title) texts.push(metadata.title);
-      // Try to get video tab titles
       const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
       for (const tab of tabs) {
         const contents = tab?.tabRenderer?.content?.sectionListRenderer?.contents || [];
@@ -902,22 +930,46 @@ function isLikelyFrench(html) {
     } catch {}
   }
 
-  if (texts.length === 0) return false;
+  return texts.filter(t => t.length > 3);
+}
 
-  const frenchAccents = /[éèêëàâîïôùûüçœÉÈÊËÀÂÎÏÔÙÛÜÇŒ]/;
-  const frenchWords = /\b(le|la|les|des|pour|dans|avec|sur|une|est|sont|pas|plus|comment|pourquoi|tous|toutes?|vidéo|abonnés?|français|chaîne|histoire|monde|faire|tous|cette|entre|sans|chez|deux|bien|très|aussi|mais|donc|donc|quand|alors|ainsi|peut|fait|faire|voir|savoir|devoir|vouloir|pouvoir|venir|aller|parler|dire|avoir|être)\b/i;
+function detectLanguage(html) {
+  const texts = extractChannelTexts(html);
+  if (texts.length === 0) return null;
 
-  let frenchScore = 0;
-  let totalScore = 0;
+  const combined = texts.join(' ');
 
-  for (const text of texts) {
-    totalScore++;
-    if (frenchAccents.test(text)) frenchScore += 2;
-    const wordMatches = text.match(frenchWords);
-    if (wordMatches) frenchScore += wordMatches.length;
+  // Strong signal: Cyrillic
+  if (LANGUAGES.ru.cyrillic.test(combined)) return 'ru';
+
+  const scores = {};
+  for (const [code, lang] of Object.entries(LANGUAGES)) {
+    let score = 0;
+    for (const text of texts) {
+      if (lang.accents && !lang.cyrillic && code !== 'en') {
+        if (lang.accents.test(text)) score += 3;
+      }
+      const wordMatches = text.match(lang.words);
+      if (wordMatches) score += wordMatches.length;
+    }
+    scores[code] = score;
   }
 
-  return frenchScore >= Math.max(totalScore * 0.3, 1);
+  // English gets an automatic boost since many words overlap
+  // but require at least a minimum score
+  const entries = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+  const best = entries[0];
+  if (best && best[1] >= 2) return best[0];
+  return null;
+}
+
+function getLanguageLabel(code) {
+  if (!code) return null;
+  return LANGUAGES[code]?.label || null;
+}
+
+function isLikelyFrench(html) {
+  return detectLanguage(html) === 'fr';
 }
 
 // --- Related channel discovery from validated channels ---
@@ -986,6 +1038,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
             rc.thumbnail = data.thumbnail || rc.thumbnail;
             rc.subscriberCount = data.subscriberCount;
             rc.description = data.description || "";
+            rc.language = detectLanguage(html);
           }
           console.log(`[Related] ${rc.channelId} (${rc.nom}): adding`);
         } catch (err) {
@@ -1004,6 +1057,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
           $last_video_date: null,
           $thumbnail: rc.thumbnail || "",
           $description: rc.description || "",
+          $language: rc.language || null,
         });
         results.push(rc);
         onResult?.(rc);
@@ -1017,6 +1071,6 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
     }
   }, 5, 500, { signal });
 
-  console.log(`[Related] Found ${results.length} new French channels from ${validated.length} validated channels`);
+  console.log(`[Related] Found ${results.length} new channels from ${validated.length} seed channels`);
   return results;
 }

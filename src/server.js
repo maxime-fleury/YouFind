@@ -536,6 +536,7 @@ const server = Bun.serve({
           $last_video_date: null,
           $thumbnail: info.thumbnail || "",
           $description: info.description || "",
+          $language: null,
         });
 
         // Auto-ingest recent videos from RSS feed (free)
@@ -1338,6 +1339,7 @@ const server = Bun.serve({
               $last_video_date: null,
               $thumbnail: info.thumbnail || "",
               $description: info.description || "",
+              $language: null,
             });
             results.added++;
             const ch = stmts.getChannelByYoutubeId.get(channelId);
