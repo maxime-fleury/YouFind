@@ -792,21 +792,29 @@ export async function resolveFromVideoUrl(videoUrl) {
 export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
   try {
     // Fetch a video from this channel to get its recommendations
+    console.log(`[Scrape] Fetching /videos for ${channelId}...`);
     const html = await fetchPageText(`https://www.youtube.com/channel/${channelId}/videos`, { signal });
-    if (!html) return [];
+    if (!html) { console.log(`[Scrape] ${channelId}: /videos page returned empty`); return []; }
+    console.log(`[Scrape] ${channelId}: /videos page fetched (${html.length} bytes)`);
 
     // Find the first video ID from this channel
     const videoMatch = html.match(/"videoId"\s*:\s*"([\w-]{11})"/);
-    if (!videoMatch) return [];
+    if (!videoMatch) {
+      console.log(`[Scrape] ${channelId}: no videoId found in /videos page`);
+      return [];
+    }
 
     const videoId = videoMatch[1];
+    console.log(`[Scrape] ${channelId}: found videoId=${videoId}`);
 
     // Scrape the video page for sidebar recommendations
     const videoHtml = await fetchPageText(`https://www.youtube.com/watch?v=${videoId}`, { signal });
-    if (!videoHtml) return [];
+    if (!videoHtml) { console.log(`[Scrape] ${channelId}: watch page returned empty`); return []; }
+    console.log(`[Scrape] ${channelId}: watch page fetched (${videoHtml.length} bytes)`);
 
     const data = extractYtInitialData(videoHtml);
-    if (!data) return [];
+    if (!data) { console.log(`[Scrape] ${channelId}: failed to extract ytInitialData from watch page`); return []; }
+    console.log(`[Scrape] ${channelId}: ytInitialData extracted, searching for related channels...`);
 
     const relatedChannels = [];
     const seenChIds = new Set();
@@ -814,11 +822,20 @@ export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
     // Extract from lockupViewModels in secondaryResults
     try {
       const results = data?.contents?.twoColumnWatchNextResults?.secondaryResults?.secondaryResults?.results || [];
+      console.log(`[Scrape] ${channelId}: ${results.length} secondary results sections`);
       for (const section of results) {
         const items = section?.itemSectionRenderer?.contents || [];
         for (const item of items) {
           const lvm = item.lockupViewModel;
-          if (!lvm) continue;
+          if (!lvm) {
+            // Log the first non-lockupViewModel item keys for debugging
+            const keys = Object.keys(item).join(', ');
+            if (keys && !seenChIds.has(`__debug_${keys}`)) {
+              seenChIds.add(`__debug_${keys}`);
+              console.log(`[Scrape] ${channelId}: item has no lockupViewModel, keys: {${keys}}`);
+            }
+            continue;
+          }
 
           // Extract channel info from the avatar's browse endpoint
           const avatar = lvm?.metadata?.lockupMetadataViewModel?.image?.decoratedAvatarViewModel;
@@ -837,6 +854,7 @@ export async function scrapeRelatedChannels(channelId, { signal = null } = {}) {
       }
     } catch {}
 
+    console.log(`[Scrape] ${channelId}: found ${relatedChannels.length} related channels in sidebar`);
     return relatedChannels.slice(0, 20);
   } catch (err) {
     console.error(`[Scrape] Failed to get related channels for ${channelId}: ${err.message}`);
@@ -913,10 +931,16 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
   const placeholders = normalizedStatuses.map(() => '?').join(', ');
   const query = `SELECT channel_id, nom FROM channels WHERE status IN (${placeholders})`;
   const baseSeeds = db.query(query).all(...normalizedStatuses);
+  console.log(`[Related] Seed channels with status [${normalizedStatuses.join(', ')}]: ${baseSeeds.length}`);
+  if (baseSeeds.length === 0) {
+    console.log(`[Related] No seed channels found — add some channels with the selected statuses first`);
+    return [];
+  }
   // Google's recommendations vary between fetches, so scraping each channel
   // `passes` times surfaces more candidates within a single run.
   const validated = [];
   for (let i = 0; i < normalizedPasses; i++) validated.push(...baseSeeds);
+  console.log(`[Related] Total tasks: ${validated.length} (${baseSeeds.length} seeds × ${normalizedPasses} passes)`);
   // Fisher-Yates shuffle so exploration order is random on every run
   for (let i = validated.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -926,6 +950,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
   const blacklisted = new Set(stmts.getBlacklistedChannelIds.all().map((r) => r.channel_id));
   const existingIds = new Set(allExisting.map((ch) => ch.channel_id));
   const excludedIds = new Set([...existingIds, ...blacklisted]);
+  console.log(`[Related] Excluded IDs: ${excludedIds.size} (${existingIds.size} existing + ${blacklisted.size} blacklisted)`);
   const seen = new Set();
   const results = [];
   let completed = 0;
@@ -952,7 +977,7 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
         if (seen.has(rc.channelId) || excludedIds.has(rc.channelId)) continue;
         seen.add(rc.channelId);
 
-        // Enrich and check if French
+        // Enrich channel info
         try {
           const html = await fetchPageText(`https://www.youtube.com/channel/${rc.channelId}`, { signal });
           if (html) {
@@ -961,11 +986,11 @@ export async function discoverRelatedFromValidated(onProgress, onResult, { passe
             rc.thumbnail = data.thumbnail || rc.thumbnail;
             rc.subscriberCount = data.subscriberCount;
             rc.description = data.description || "";
-            if (!isLikelyFrench(html)) continue;
           }
+          console.log(`[Related] ${rc.channelId} (${rc.nom}): adding`);
         } catch (err) {
           if (signal?.aborted) throw err;
-          continue;
+          console.log(`[Related] ${rc.channelId}: error fetching channel page: ${err.message}`);
         }
 
         rc.source_channel = ch.nom;
