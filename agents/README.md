@@ -12,6 +12,7 @@ This directory contains focused technical notes for AI agents working on YouFind
 | SQLite, migrations, FTS, backups | `DATABASE.md` |
 | HTTP/frontend contracts | `CONTRACTS.md` |
 | Tests and fixtures | `TESTING.md` |
+| Understanding architectural rationale | `DECISIONS.md` |
 
 ## Document ownership
 
@@ -24,6 +25,7 @@ This directory contains focused technical notes for AI agents working on YouFind
 - `DATABASE.md`: database source of truth and invariants.
 - `CONTRACTS.md`: HTTP, jobs, and frontend/backend contracts.
 - `TESTING.md`: test policy, fixtures, isolation, and coverage gaps.
+- `DECISIONS.md`: accepted architectural choices, rationale, and consequences.
 
 ## Update policy
 
@@ -33,6 +35,7 @@ When a file is added, removed, renamed, or changes responsibility:
 2. update `ARCHITECTURE.md` if a boundary changes;
 3. update `CONTRACTS.md` if a public route or payload changes;
 4. update `DATABASE.md` for schema/index/migration changes;
-5. update `TESTING.md` when the test strategy changes.
+5. update `TESTING.md` when the test strategy changes;
+6. update `DECISIONS.md` when an architectural choice or trade-off changes.
 
 Do not copy entire implementations into documentation. Document role, inputs, outputs, invariants, and sharp edges.

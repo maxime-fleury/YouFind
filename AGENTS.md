@@ -9,7 +9,8 @@ This is the short entrypoint for AI agents. Detailed notes live in [`agents/`](a
 3. [`agents/ARCHITECTURE.md`](agents/ARCHITECTURE.md) — boundaries and flows;
 4. [`agents/DATABASE.md`](agents/DATABASE.md) — SQLite schema and invariants;
 5. [`agents/CONTRACTS.md`](agents/CONTRACTS.md) — HTTP/jobs/frontend contracts;
-6. [`agents/TESTING.md`](agents/TESTING.md) — tests and fixtures.
+6. [`agents/TESTING.md`](agents/TESTING.md) — tests and fixtures;
+7. [`agents/DECISIONS.md`](agents/DECISIONS.md) — rationale behind architectural choices.
 
 `STRUCTURE.md` and `TESTING.md` at the root remain compatibility indexes for tools and humans.
 
@@ -76,4 +77,4 @@ curl http://127.0.0.1:32140/api/stats
 
 ## Documentation rule
 
-When a file, route, schema, job, or test boundary changes, update the matching document in `agents/`. Keep each document under roughly 500 lines and avoid duplicating implementation code.
+When a file, route, schema, job, or test boundary changes, update the matching document in `agents/`. When a design choice changes, update `agents/DECISIONS.md` with the reason and consequences. Keep each document under roughly 500 lines and avoid duplicating implementation code.

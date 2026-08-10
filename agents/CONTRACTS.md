@@ -26,10 +26,19 @@ GET /api/rss-info
 GET /api/llm-status
 GET /api/videos?limit=&offset=&sort=&topic=&q=
 GET /api/channels?status=&sort=&q=&include=topics,preview
+GET /api/channels/:id/detail
+GET /api/channels/:id/related
+GET /api/channels/:id/preview
+GET /api/channels/:id/topics
 GET /api/topics
 GET /api/feedback?limit=
 GET /api/settings
 GET /api/export
+GET /api/refresh/status
+GET /api/refresh-videos/status
+GET /api/refresh-pending-videos/status
+GET /api/refresh-stats/status
+GET /api/score-status?job=
 GET /api/jobs/:id
 ```
 
@@ -38,6 +47,7 @@ GET /api/jobs/:id
 ```text
 POST /api/channels
 POST /api/channels/resolve
+POST /api/channels/resolve-video
 POST /api/channels/import
 POST /api/channels/:id/validate
 POST /api/channels/:id/reject
@@ -68,11 +78,21 @@ POST /api/score-cancel
 
 ```text
 POST/PATCH/DELETE /api/topics
+GET/POST/DELETE /api/channels/:id/topics
 POST/DELETE /api/watched
 POST /api/settings
 POST /api/import
 POST /api/feedback
 ```
+
+## Route topology
+
+The current server intentionally has two route mechanisms:
+
+1. declarative handlers in `Bun.serve({ routes: ... })` for the common static patterns;
+2. manual `fetch()` branches for dynamic or incremental workflows such as related discovery, jobs, channel detail, and imports.
+
+This split is technical debt, not two different API contracts. When changing a route, search both the `routes` block and the manual `fetch()` branches, then preserve the method, path, status code, and JSON shape. A future router extraction should move one domain at a time and keep this external contract unchanged.
 
 ## Job contract
 
@@ -144,4 +164,6 @@ When changing a route or job:
 - preserve terminal job statuses;
 - preserve error shape `{ error: string }` where currently used;
 - update `README.md`, this file, and tests;
-- add a migration if persistence changes.
+- check both route mechanisms described above;
+- add a migration if persistence changes;
+- update `agents/DECISIONS.md` if the compatibility strategy changes.

@@ -23,6 +23,16 @@ The main coupling points are:
 
 Do not rewrite these files wholesale. Extract one stable boundary at a time and preserve API/HTML contracts.
 
+## Risk map
+
+| Area | Risk | Why it matters | First safe move |
+|---|---|---|---|
+| `src/server.js` | High | HTTP, SQL, network, jobs, and static files share one process boundary. | Add route/service tests, then extract one domain without changing paths. |
+| `src/db.js` | High | Import opens the user database and mixes bootstrap, migrations, FTS, settings, and statements. | Keep `:memory:` repository tests and move one schema concern behind a tested boundary. |
+| `public/js/app.js` | Medium-high | Many global functions and page states are coupled through inline HTML handlers. | Extract one page domain while preserving global wrappers. |
+| External adapters | High | YouTube, RSS, and LLM formats can change or hang. | Inject/mock clients and test retry, abort, and parser boundaries. |
+| Documentation | Medium | README and technical guides can drift when they duplicate route/schema details. | Keep ownership explicit and update the focused document, not every index. |
+
 ## Desired dependency direction
 
 ```text
@@ -50,7 +60,8 @@ Rules:
 - `src/rss-parser.js`: pure RSS entry parsing;
 - `public/js/glob.constants.js`: frontend page/status/limit/timing constants;
 - `public/js/glob.utils.js`: frontend formatting, sanitization, and export helpers;
-- `public/css/style.css`: CSS manifest.
+- `public/css/style.css`: CSS manifest;
+- `agents/DECISIONS.md`: rationale for the local-first, classic-script, hybrid-migration, and parser-boundary choices.
 
 ## Main flows
 
@@ -130,5 +141,6 @@ Do not move a shared declaration after a script that uses it. Avoid new global v
 6. Extract remaining YouTube/LLM parsers and add local fixtures.
 7. Split `app.js` into channels, discovery, related, player, and backup modules.
 8. Remove inline handlers gradually, then introduce a stronger CSP.
+9. Add a lightweight documentation drift check for file links, route inventory, and the Markdown line limit.
 
 Avoid adding a framework solely to reduce file length.

@@ -13,6 +13,7 @@ The detailed agent documentation is split into focused files under [`agents/`](a
 | [`agents/DATABASE.md`](agents/DATABASE.md) | Tables, relations, indexes, FTS, migrations, and SQLite safety. |
 | [`agents/CONTRACTS.md`](agents/CONTRACTS.md) | HTTP, jobs, frontend loading, escaping, and secret contracts. |
 | [`agents/TESTING.md`](agents/TESTING.md) | Test layers, fixtures, isolation, and coverage priorities. |
+| [`agents/DECISIONS.md`](agents/DECISIONS.md) | Architectural rationale and trade-offs. |
 | [`TESTING.md`](TESTING.md) | Compatibility pointer to the detailed testing guide. |
 
 ## Runtime map
@@ -40,6 +41,7 @@ The application is a local, working monolith. `src/server.js`, `src/db.js`, `pub
 - agent workflow: `AGENTS.md` and `agents/`;
 - API/job behavior: `agents/CONTRACTS.md` plus route implementation;
 - SQLite behavior: `agents/DATABASE.md` plus `src/db.js`/`src/migrations.js`;
-- tests: `agents/TESTING.md` plus the actual test files.
+- tests: `agents/TESTING.md` plus the actual test files;
+- architectural rationale: `agents/DECISIONS.md`.
 
-Update the relevant focused document when a responsibility changes. Keep documentation factual and under roughly 500 lines per file.
+Update the relevant focused document when a responsibility changes. Keep documentation factual and under roughly 500 lines per file. `STRUCTURE.md` is an index, not a second file catalogue.

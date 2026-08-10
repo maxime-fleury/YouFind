@@ -10,6 +10,7 @@ Paths are relative to the repository root. Read this file before opening large m
 | `AGENTS.md` | Short rules and workflow for AI agents. |
 | `STRUCTURE.md` | Documentation index. |
 | `TESTING.md` | Pointer to the detailed testing guide. |
+| `agents/` | Focused agent documentation; see `agents/README.md`. |
 | `package.json` | Bun scripts and syntax-check file list. |
 | `bun.lock` | Bun dependency lockfile. |
 | `package-lock.json` | Historical npm lockfile; do not regenerate casually. |
@@ -69,6 +70,7 @@ Paths are relative to the repository root. Read this file before opening large m
 - `scripts/backup-db.js`: CLI wrapper for `runBackup()`.
 - `scripts/score-rejected.js`: real-database one-off scorer; not an isolated test.
 - `test-workflows.js`: manual destructive integration workflow; never run casually against user data.
+- `tests/`: automated tests; all current tests are offline or use in-memory SQLite.
 - `tests/utils.test.js`: concurrency and job utility tests.
 - `tests/jobs.test.js`: in-memory migration/repository tests.
 - `tests/parsers.test.js`: offline YouTube/RSS fixture tests.
@@ -83,3 +85,4 @@ Paths are relative to the repository root. Read this file before opening large m
 - Do not import `db.js` in pure parser tests.
 - Do not copy a WAL database as a backup; use the backup module.
 - Preserve classic-script order and inline handler compatibility.
+- Route declarations are split between the `Bun.serve({ routes })` block and manual `fetch()` branches in `src/server.js`; inspect both before changing an endpoint.

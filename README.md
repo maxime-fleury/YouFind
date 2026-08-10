@@ -2,7 +2,7 @@
 
 **Découvre et organise des chaînes YouTube sans algorithme, sans pub, sans tracker.**
 
-> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md), puis consulter [`agents/FILES.md`](agents/FILES.md) pour le rôle de chaque fichier. L'architecture détaillée est dans [`agents/ARCHITECTURE.md`](agents/ARCHITECTURE.md) et la stratégie de tests dans [`agents/TESTING.md`](agents/TESTING.md). [`STRUCTURE.md`](STRUCTURE.md) reste l'index rapide.
+> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md), puis consulter [`agents/FILES.md`](agents/FILES.md) pour le rôle de chaque fichier. L'architecture détaillée est dans [`agents/ARCHITECTURE.md`](agents/ARCHITECTURE.md), les décisions dans [`agents/DECISIONS.md`](agents/DECISIONS.md) et la stratégie de tests dans [`agents/TESTING.md`](agents/TESTING.md). [`STRUCTURE.md`](STRUCTURE.md) reste l'index rapide.
 
 YouFind est un outil de curation vidéo qui tourne en local. Au lieu de subir l'algorithme de YouTube, tu ajoutes toi-même des chaînes, les organises par thèmes, découvres des chaînes similaires, et laisses un LLM local t'aider à prioriser ce qui mérite ton temps.
 
@@ -171,11 +171,13 @@ youfind/
 │   └── migrations.js    # Migrations versionnées de l'infrastructure
 ├── AGENTS.md               # Point d'entrée court pour les agents IA
 ├── agents/                 # Documentation technique spécialisée (< 500 lignes/fichier)
+│   ├── README.md
 │   ├── FILES.md
 │   ├── ARCHITECTURE.md
 │   ├── DATABASE.md
 │   ├── CONTRACTS.md
-│   └── TESTING.md
+│   ├── TESTING.md
+│   └── DECISIONS.md
 ├── TESTING.md             # Index de compatibilité vers agents/TESTING.md
 ├── tests/                  # Tests unitaires et fixtures locales
 │   ├── http-helpers.test.js
@@ -200,7 +202,7 @@ youfind/
 │   ├── css/channels.css # Recherche et contrôles des chaînes
 │   ├── css/topics.css   # Badges et sélecteur de topics
 │   └── css/responsive.css # Responsive et règles transversales
-├── backups/             # Sauvegardes automatiques (14 jours)
+├── backups/             # Sauvegardes automatiques (14 backups conservés)
 ├── youfind.db           # Base SQLite (créée automatiquement)
 ├── package.json
 └── .env
@@ -228,7 +230,7 @@ youfind/
 
 ## API
 
-Toutes les routes sont préfixées par `/api/`. Les réponses sont en JSON.
+Toutes les routes sont préfixées par `/api/`. Les réponses sont en JSON. Les tableaux ci-dessous donnent l'aperçu public ; l'inventaire technique complet, les statuts et les contrats de jobs sont maintenus dans [`agents/CONTRACTS.md`](agents/CONTRACTS.md).
 
 ### Statistiques & santé
 
@@ -288,7 +290,7 @@ Les scripts frontend restent des scripts classiques (et non des modules ES) pour
 
 Le CSS est chargé via `style.css`, qui agit comme manifeste et importe `base.css`, `glob.utils.css`, puis les feuilles thématiques. `base.css` contient encore les fondations et une partie des styles historiques ; les nouveaux styles globaux vont dans `glob.utils.css`, tandis que les styles de page doivent être ajoutés dans la feuille thématique correspondante.
 
-La suite de tests est volontairement sans réseau et sans base utilisateur. Voir [`TESTING.md`](TESTING.md) pour les conventions de fixtures, le smoke test et les priorités de couverture.
+La suite de tests est volontairement sans réseau et sans base utilisateur. Voir [`agents/TESTING.md`](agents/TESTING.md) pour les conventions de fixtures, le smoke test et les priorités de couverture. Les documents techniques ont chacun une responsabilité unique afin d'éviter les divergences.
 
 ### Scoring
 

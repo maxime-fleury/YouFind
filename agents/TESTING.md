@@ -30,7 +30,10 @@ Stop the server after testing. Do not run this against a shared production datab
 - `tests/jobs.test.js`: in-memory migrations and job repository;
 - `tests/parsers.test.js`: pure YouTube/RSS fixtures;
 - smoke tests: server startup, API stats, and static assets;
-- `test-workflows.js`: manual destructive workflow, excluded from `bun test`.
+- `test-workflows.js`: manual destructive workflow, excluded from `bun test`;
+- documentation checks: links, ownership, and the roughly 500-line limit per Markdown file.
+
+`bun run check` is an explicit syntax-check list. When a JavaScript module is added or renamed, update `package.json`; do not assume the command covers every file automatically.
 
 ## Isolation rules
 
@@ -80,6 +83,19 @@ Put large fixtures in `tests/fixtures/`, document their origin, and remove secre
 4. Read the implementation diff before weakening an assertion.
 5. Fix the contract or code, then run the full suite.
 
+## Documentation validation
+
+For documentation-only changes, verify:
+
+```bash
+for f in README.md AGENTS.md STRUCTURE.md TESTING.md agents/*.md; do
+  test "$(wc -l < "$f")" -lt 500 || exit 1
+done
+grep -R -n -E '\]\([^)]*\)' README.md AGENTS.md STRUCTURE.md TESTING.md agents
+```
+
+Then check that each link points to a tracked file or a documented external URL. Keep root files as indexes; do not copy the complete file catalogue, route list, schema, or test strategy into them.
+
 ## Definition of done
 
 - nominal and relevant invalid/boundary behavior is covered;
@@ -87,4 +103,5 @@ Put large fixtures in `tests/fixtures/`, document their origin, and remove secre
 - `bun test` passes;
 - `bun run check` passes;
 - `git diff --check` passes;
-- docs and fixtures are updated when a boundary changes.
+- docs and fixtures are updated when a boundary changes;
+- documentation ownership is respected and every Markdown file remains under roughly 500 lines.

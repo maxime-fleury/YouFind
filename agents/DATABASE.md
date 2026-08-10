@@ -16,14 +16,11 @@ Do not add a durable column with an untracked `ALTER TABLE`. Add a migration and
 ```mermaid
 erDiagram
     CHANNELS ||--o{ VIDEOS : owns
-    CHANNELS ||--o{ FEEDBACK_LOG : receives
     CHANNELS ||--o{ CHANNEL_TOPICS : assigned
     TOPICS ||--o{ CHANNEL_TOPICS : groups
-    CHANNELS ||--o{ WATCHED_VIDEOS : indirectly_references
-    JOBS ||--o{ JOB_RESULTS : stores_json
 ```
 
-`watched_videos` stores video URLs rather than a foreign key. `jobs.results` is currently a bounded JSON array, not a normalized table.
+Only the three relations above are enforced by SQLite foreign keys. `feedback_log` is an append-only history without a foreign key, `watched_videos` stores video URLs without a foreign key, and `jobs.results` is a bounded JSON column rather than a normalized `job_results` table.
 
 ## Tables
 
@@ -123,6 +120,17 @@ FTS tables:
 
 Triggers keep FTS synchronized. `rebuildChannelsFts()` is the repair path; do not rebuild on every normal startup unless the consistency check detects drift.
 
+## Relations that are conceptual only
+
+These links are useful to understand the domain but are not enforced as foreign keys:
+
+- `feedback_log.channel_id` refers to a YouTube channel ID and may outlive a deleted channel;
+- `watched_videos.url` refers to `videos.url`, so watched state can survive video cleanup or import changes;
+- `jobs.results` contains serialized discovery results and is read through the job repository;
+- `videos.channel_id` uses `channels.channel_id`, not the internal `channels.id`.
+
+Do not add a foreign key or cascade delete to one of these relations without checking import, backup, and cleanup behavior.
+
 ## Query and transaction rules
 
 - use prepared statements or bound parameters;
@@ -141,7 +149,7 @@ Triggers keep FTS synchronized. `rebuildChannelsFts()` is the repair path; do no
 - test migrations on a copy or in-memory database;
 - verify rollback behavior for multi-step imports;
 - preserve secrets exclusion in exports;
-- document every schema change in this file and `STRUCTURE.md`.
+- document every schema change in this file and update `agents/DECISIONS.md` when the migration strategy or an invariant changes.
 
 ## Planned schema work
 
