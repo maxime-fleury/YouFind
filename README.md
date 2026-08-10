@@ -2,7 +2,7 @@
 
 **Découvre et organise des chaînes YouTube sans algorithme, sans pub, sans tracker.**
 
-> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md) avant toute modification.
+> Pour les agents IA et contributeurs techniques, lire [`AGENTS.md`](AGENTS.md), puis consulter [`STRUCTURE.md`](STRUCTURE.md) pour le rôle détaillé de chaque fichier.
 
 YouFind est un outil de curation vidéo qui tourne en local. Au lieu de subir l'algorithme de YouTube, tu ajoutes toi-même des chaînes, les organises par thèmes, découvres des chaînes similaires, et laisses un LLM local t'aider à prioriser ce qui mérite ton temps.
 
@@ -169,13 +169,15 @@ youfind/
 │   ├── index.html       # SPA (Bootstrap 5, Bootstrap Icons)
 │   ├── js/api.js        # Client API partagé (timeout et annulation)
 │   ├── js/poller.js     # Polling générique des jobs asynchrones
-│   ├── js/core.js       # État, navigation, formatage et toasts
+│   ├── js/glob.utils.js # Utilitaires frontend globaux (formatage, sécurité, export)
+│   ├── js/core.js       # État, navigation et initialisation des pages
 │   ├── js/stats.js      # Dashboard et compte à rebours RSS
 │   ├── js/videos.js     # Feed vidéo, pagination et prefetch
 │   ├── js/settings.js   # Réglages LLM et gestion des secrets
 │   ├── js/app.js        # Fonctionnalités restantes et façade historique
 │   ├── css/style.css    # Manifeste CSS et ordre des imports
 │   ├── css/base.css     # Fondations, composants partagés et styles legacy
+│   ├── css/glob.utils.css # Classes utilitaires et animations globales
 │   ├── css/videos.css   # Feed vidéo et états de chargement
 │   ├── css/channels.css # Recherche et contrôles des chaînes
 │   ├── css/topics.css   # Badges et sélecteur de topics
@@ -264,9 +266,9 @@ Les jobs de scoring et de découverte similaire sont enregistrés dans SQLite. U
 
 ### Frontend modulaire
 
-Les scripts frontend restent des scripts classiques (et non des modules ES) pour préserver les fonctions globales utilisées par les handlers inline de la SPA. L'ordre de chargement est `api.js`, `poller.js`, `core.js`, `stats.js`, `videos.js`, `settings.js`, puis `app.js`. Cette organisation permet d'extraire progressivement les pages sans changer les contrats HTML existants.
+Les scripts frontend restent des scripts classiques (et non des modules ES) pour préserver les fonctions globales utilisées par les handlers inline de la SPA. L'ordre de chargement est `api.js`, `poller.js`, `glob.utils.js`, `core.js`, `stats.js`, `videos.js`, `settings.js`, puis `app.js`. Les helpers globaux sont donc disponibles avant les modules de page. Cette organisation permet d'extraire progressivement les pages sans changer les contrats HTML existants.
 
-Le CSS est chargé via `style.css`, qui agit comme manifeste et importe `base.css` puis les feuilles thématiques. `base.css` contient encore les fondations et une partie des styles historiques ; les nouveaux styles de page doivent être ajoutés dans la feuille thématique correspondante.
+Le CSS est chargé via `style.css`, qui agit comme manifeste et importe `base.css`, `glob.utils.css`, puis les feuilles thématiques. `base.css` contient encore les fondations et une partie des styles historiques ; les nouveaux styles globaux vont dans `glob.utils.css`, tandis que les styles de page doivent être ajoutés dans la feuille thématique correspondante.
 
 ### Scoring
 

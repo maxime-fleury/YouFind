@@ -1,13 +1,5 @@
 // YouFind settings page.
 
-// For embedding user data in onclick="..." attributes (double context: HTML + JS):
-// 1. JS-escape first, then HTML-escape the attribute context.
-function escapeInlineJs(str) {
-  if (!str) return "";
-  const jsSafe = str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/`/g, "\\`");
-  return jsSafe.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 async function loadLLMHealth() {
   const badge = document.getElementById("llm-badge");
   const healthDiv = document.getElementById("llm-health");

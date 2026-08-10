@@ -290,25 +290,6 @@ function renderCompactTable(channels) {
     </div>`;
 }
 
-function downloadTextFile(content, filename, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-// Prevent CSV formula injection (Excel interprets =, +, -, @ as formulas).
-function csvEscape(value) {
-  let s = String(value ?? "");
-  if (/^[=+\-@]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
 async function exportChannels(format) {
   try {
     // Toutes les chaines, quel que soit le filtre courant
@@ -1278,35 +1259,8 @@ async function populateTopicFilter(force = false) {
 
 
 // ═══════════════════════════════════════════
-//  UTILITIES: Sanitization & Watched Videos
+//  FEATURE: Watched Videos
 // ═══════════════════════════════════════════
-function escapeHtml(str) {
-  if (!str) return "";
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function safeImageUrl(value) {
-  if (!value) return "";
-  try {
-    const url = new URL(value, window.location.origin);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
-    return escapeHtml(url.href);
-  } catch {
-    return "";
-  }
-}
-
-function safeYoutubeThumbnailUrl(videoUrl) {
-  const videoId = extractVideoId(videoUrl);
-  return videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : "";
-}
-
-function safeChannelId(value) {
-  return /^[A-Za-z0-9_-]{1,64}$/.test(String(value || "")) ? String(value) : "";
-}
-
 let _seenCache = null;
 let _seenLoaded = false;
 let _seenLoadPromise = null;
@@ -1377,23 +1331,6 @@ async function toggleVideoSeen(url, event) {
       btn.title = seen ? "Marquer comme non vu" : "Marquer comme vu";
     }
   }
-}
-
-function extractVideoId(url) {
-  if (!url) return null;
-  const patterns = [
-    /[?&]v=([\w-]{11})/,
-    /youtu\.be\/([\w-]{11})/,
-    /youtube\.com\/embed\/([\w-]{11})/,
-    /youtube\.com\/shorts\/([\w-]{11})/,
-    /youtube\.com\/v\/([\w-]{11})/,
-  ];
-  for (const p of patterns) {
-    const m = url.match(p);
-    if (m) return m[1];
-  }
-  const fallback = url.split("/").pop();
-  return fallback?.length === 11 ? fallback : null;
 }
 
 // ═══════════════════════════════════════════
@@ -1561,11 +1498,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Preload watched videos from DB in the background
   loadSeenVideos();
 });
-
-function escapeJs(str) {
-  if (!str) return "";
-  return str.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/`/g, "\\`");
-}
 
 // --- Batch Import ---
 async function batchImport() {

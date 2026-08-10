@@ -3,6 +3,7 @@
  * Page-specific rules live in their own files so future edits stay localized.
  */
 @import url("./base.css");
+@import url("./glob.utils.css");
 @import url("./videos.css");
 @import url("./channels.css");
 @import url("./topics.css");
