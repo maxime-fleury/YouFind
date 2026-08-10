@@ -818,9 +818,9 @@ const server = Bun.serve({
 
         // Auto-ingest videos for newly discovered channels (free RSS)
         if (results.channels.length > 0) {
-          Promise.all(results.channels.map((ch) =>
+          await Promise.all(results.channels.map((ch) =>
             ingestChannel(ch.channelId).catch(() => {})
-          )).catch(() => {});
+          ));
         }
 
         return json({ ok: true, topic: topicQuery, found: results.channels.length, channels: results.channels, method: results.method });

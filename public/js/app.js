@@ -543,6 +543,8 @@ async function runDiscovery() {
     loadStats();
     loadTopics();
     populateTopicFilter();
+    // Auto-score discovered channels
+    if (channels.length > 0) scoreAll();
   } catch (err) {
     if (badge) badge.innerHTML = '<span class="status-badge rejected"><i class="bi bi-x-circle"></i> Échec</span>';
     if (status) status.innerHTML = `<span class="discover-error"><i class="bi bi-exclamation-circle-fill"></i> ${escapeHtml(err.message)}</span>`;
