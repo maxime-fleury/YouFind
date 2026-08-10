@@ -1668,6 +1668,8 @@ async function runRelatedPass({ status, results, passes, statuses }) {
         // pollJob advances the cursor from the server's `next` value before
         // constructing the following status URL.
         status.innerHTML = `<span class="related-live-status"><i class="bi bi-broadcast-pin"></i> ${multi ? `Exploration x${passes} — ` : ""}${data.found} chaîne${data.found === 1 ? "" : "s"} affichée${data.found === 1 ? "" : "s"} en temps réel</span>`;
+        // Auto-score each new channel as soon as it arrives
+        if (!isScoreProgressRunning) scoreAllUnscored("related-score");
       }
       if (typeof data.paused === 'boolean') {
         const pauseBtn = document.getElementById('related-pause-btn');
